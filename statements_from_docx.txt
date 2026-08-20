@@ -1,0 +1,240 @@
+[8/20/26 4:16 PM] Ян Сенин: 2026 Huawei Algorithm Competition - Preliminary Round Task Document
+
+High-Precision 4-Bit Numerical Conversion Algorithm 
+ 
+  2026 Huawei Algorithm Competition Organizing Committee 
+  2026-07-15 
+ 
+ Huawei Technologies Co., Ltd   
+ 
+
+
+Table of Contents
+
+1 Background Information 3
+1.1 High-Precision 4-Bit Numerical Background 3
+1.2 Definition of High-Precision 4-Bit Numerical Conversion Algorithm 4
+1.3 High-Precision 4-Bit Numerical Formats 5
+1.4 High-Precision 4-Bit Numerical Conversion Algorithm Challenges 6
+1.5 References of High-Precision 4-Bit Numerical Conversion Algorithm 7
+2 Problem Definition 8
+2.1 Competition Process 8
+2.2 Optimization Objectives 9
+2.3 Judging Process 10
+2.4 API Definition 11
+2.4.1 Python API 11
+3 Scoring Rules 12
+
+ 
+Background Information
+High-Precision 4-Bit Numerical Background
+With the release and widespread adoption of large models such as ChatGPT and GPT-4, Large Language Models (LLMs) have become a major focus of attention in the industry. However, the high deployment costs associated with LLM inference can significantly hinder their widespread adoption.
+Quantization is a key technology for accelerating LLM inference in the industry. In short-context scenarios (e.g., sequence lengths below 2K tokens), LLM inference is typically memory-bound, with weight movement overhead becoming the primary performance bottleneck. Applying weight quantization or weight-activation quantization to Linear layers can effectively improve inference efficiency. For long-context scenarios, the memory consumption of KV cache and the overall computational workload increase dramatically. Therefore, quantization of both Linear layers and KV cache is required to accelerate inference and alleviate computational and memory bottlenecks..
+In recent years, low-precision computing has become a key approach to improving training efficiency and reducing memory consumption. The evolution from FP16 to FP8 and FP4 demonstrates a clear trend, with 4-bit precision becoming a critical choice for next-generation LLM training and inference. Since different computing hardware vendors define 4-bit numerical formats differently, format conversion from various 4-bit representations to Ascend HiF4 is required. This will improve AscendвЂ™s future compatibility with the 4-bit inference ecosystem and better support 4-bit model deployment, meeting customer requirements for 4-bit inference on Ascend platforms or in hybrid Ascend-GPU environments..
+HiFloat4 Format for Language Model Inference
+Definition of High-Precision 4-Bit Numerical Conversion Algorithm
+Given matrix multiplication inputs A and B (format S), converted to format T via the 4-bit conversion algorithm f_(Sв†’T), both de-quantized to FP32 before performing matrix multiplication. The requirement is that the MSE of the MatMul result before and after conversion is sufficiently smallпјљ
+ 
+Given Q, K, V in Attention computation (format S), converted to format T via the 4-bit conversion algorithm f_(Sв†’T), all de-quantized to FP32 before performing Attention. The requirement is that the MSE of the Attention result before and after conversion is sufficiently smallпјљ
+ 
+Where
+X_FP32=гЂ–DequantгЂ—_FP32 (X_S)
+X М‚_T=гЂ–DequantгЂ—_FP32 (f_(Sв†’T) (X_T )) 
+S=NVFP4пјЊT = HiF4
+High-Precision 4-Bit Numerical Formats
+  
+ Fig 1  HIF4 Block Format Structure
+
+ 
+Fig 2  Calculation method for HiF4
+
+ 
+Fig 3   Introduction to Typical Values and Characteristics of HiF4
+High-Precision 4-Bit Numerical Conversion Algorithm Challenges
+Scale Hierarchy Mismatch: Different 4-bit data formats have different quantization scale hierarchies. Other 4-bit quantization scales cannot be directly mapped to HiF4's three-level hierarchy (E6M2 + E1_8 + E1_16), requiring a complete reconstruction of the statistical domain and scaling logic.
+[8/20/26 4:16 PM] Ян Сенин: Value Set Space Misalignment: Different 4-bit formats produce different discrete value set distributions after quantization (e.g., 4в†’6 interval spacing vs. 0.25 step size). Dequantization-then-requantization introduces secondary truncation errors.
+Increased outlier sensitivity: Increasing the block size from 16 to 64 causes a single outlier to reduce the effective precision of the entire block. This requires redesigning outlier isolation and hierarchical compensation mechanisms..
+References of High-Precision 4-Bit Numerical Conversion Algorithm
+ HiFloat4 Format for Language Model Inference
+HiFloat4 Format for Language Model Inference
+ Pretraining Large Language Models with NVFP4 
+ Pretraining Large Language Models with NVFP4
+
+вЂѓ
+Problem Definition
+Competition Process
+ Code SubmissionпјљParticipants shall upload their algorithm code, which must include a solution.py file. The function implementations must comply with the interface definitions specified in Section 2.4:
+ hif4_calibration_and_quantize_weight: Accepts weight data in NVFP4 format and calibration activation data, performs weight quantization, and returns the HiF4 weight quantization parameters together with the state parameters required for online activation quantization.
+ hif4_dynamic_quantize_activation: Accepts online activation data in NVFP4 format together with the state parameters generated during the calibration stage, and dynamically generates the corresponding HiF4 activation quantization parameters.
+ hif4_calibration_attention: Accepts Q, K, and V data in NVFP4 format from the calibration stage and generates the state parameters required for subsequent online quantization of Q, K, and V.
+ hif4_dynamic_quantize_q, hif4_dynamic_quantize_k, and hif4_dynamic_quantize_v: Respectively accept online Q, K, and V data in NVFP4 format together with their corresponding state parameters, and dynamically generate the respective HiF4 quantization parameters.
+ Participants shall package the solution.py file directly into a solution.zip archive and submit the archive.
+ Code ExecutionпјљThe competition platform executes the submitted algorithm code and records the following key metrics. Detailed metric definitions are provided in Section 2.2пјљ
+ Quantization parameter legality check: The evaluation script performs strict validation of the HiF4 quantization parameters output by contestants, including the E6M2 format constraints for scale_factor, scale_lv2 в€€ {1,2}, scale_lv3 в€€ {1,2}, sign в€€ {-1,0,1}, and mant в€€ {0, 0.25, ..., 1.75}.
+ Quantization function execution time check: The competition platform will use contestants' quantization functions to process all datasets for validation and measure the total execution time. Submissions exceeding the specified time limit will be considered failed.
+ Large model output score: This competition adopts industry-standard quantization evaluation metrics, as shown in the figure below. Contestants' quantization functions will be applied to the data, and the resulting model evaluation scores will be recorded.
+ Question 1пјљ 
+  
+ Question 2пјљ
+  
+  
+  
+  
+ .
+ Score Calculation: This competition compares the MSE score generated by the contestant's quantization function with that generated by the standard HiF4 quantization function. The accumulated percentage improvement in MSE score is used as the contestant's final score. Algorithms with excessive execution time or computational complexity may be considered timed out and receive no score. Higher-scoring contestants will achieve higher rankings. For detailed scoring criteria, please refer to Section 2.2 (subject to the final online version).
+ The final score is calculated as the sum of MSE improvement percentages across all test cases.
+ If the quantization parameters generated by the algorithm violate the defined parameter ranges in any test case, the submission will be considered invalid. Contestants are advised to use the self_check.py tool provided in the Appendix to verify that their algorithm outputs meet the requirements before submission
+[8/20/26 4:16 PM] Ян Сенин: For any test case in the test set, if the contestant's algorithm achieves worse MSE performance than the standard HiF4 quantization function, a negative score will be assigned. The penalty will be proportional to the degradation level: the larger the performance gap, the larger the negative score.
+ Result Reporting: The judging system returns contestants' scores to the platform web frontend, where the results are displayed for participants.
+
+
+
+
+Optimization Objectives
+Given:
+ Problem 1: Linear Scenarioпјљ
+ Calibration and Weight Quantization
+ Weight matrices in NVFP4 format and their corresponding quantization parameters;
+ Multiple sets of calibration activation data in NVFP4 format corresponding to the weights.
+ Online Activation Quantization
+ Online activation matrices in NVFP4 format and their corresponding quantization parameters.
+ Problem 2: Attention Scenario
+ Calibration
+ Multiple sets of calibration Q, K, and V data in NVFP4 format.
+ Online Attention Quantization
+ Online Q, K, and V matrices in NVFP4 format and their corresponding quantization parameters.
+Objectives:
+Develop NVFP4-to-HiF4 quantization algorithms for the Linear and Attention scenarios, respectively. The algorithms may leverage calibration data to determine quantization-related states or parameters in advance, and dynamically quantize activations and Q, K, and V during the online stage.
+ Linear Scenario:
+ Perform offline HiF4 quantization on the weights, and dynamically quantize online activations to HiF4 using calibration information, with the objective of minimizing the MSE between the quantized Linear output X_HIF4@W_HIF4^T, and the reference output computed from the dequantized original NVFP4 data X_NVFP4@W_NFFP4^T
+ Attention Scenario:
+ Use calibration Q, K, and V data to generate the states required for online quantization, and dynamically quantize online Q, K, and V to HiF4, respectively, with the objective of minimizing the MSE between the quantized Attention output гЂ–Attention (QгЂ—_HIF4,K_(HIF4,)^T V_HIF4^T)  and the reference Attention output computed from the dequantized original NVFP4 data гЂ–Attention (QгЂ—_NVFP4,K_(NVFP4,)^T V_NVFP4^T)
+
+Judging Process
+ Submission of Algorithm Code Package
+ Participants shall upload an algorithm code package. The package must contain a solution.py file implementing the following six functions in accordance with the specified interface definitions: hif4_calibration_and_quantize_weight, hif4_dynamic_quantize_activation, hif4_calibration_attention, hif4_dynamic_quantize_q, hif4_dynamic_quantize_k, and hif4_dynamic_quantize_v. Participants may include additional auxiliary code files in the package..
+ Loading the Test Dataset and Standard HiF4 Quantization Functions
+ The test dataset consists of two categories: Linear and Attention. Each category contains both calibration data and test data.
+ Linear Calibration and Weight Quantization
+ For each Linear dataset, the participantвЂ™s hif4_calibration_and_quantize_weight function is called with the weight data in NVFP4 format and the corresponding calibration activation data as inputs. The function shall return:
+ HiF4 weight quantization parameters; 
+ activation_state, which will be used for subsequent online activation quantization.
+ Requirements for activation_state
+ The hif4_calibration_and_quantize_weight function may generate activation_state based on the weight and calibration activation data for use in subsequent online activation quantization. The state may store calibration information, scaling parameters, fixed weight information, or other algorithm-specific states required by the quantization method.
+ activation_state is generated during the weight calibration stage and passed to the subsequent online activation quantization function. It may contain calibration parameters, scaling factors, fixed weights, and other algorithm states, subject to the following format requirements:
+[8/20/26 4:16 PM] Ян Сенин: The state may consist only of None, Boolean values, integers, finite floating-point values, strings, CPU Tensors, lists, tuples, and dictionaries with string keys.
+ Supported Tensor data types are bool, int8, int16, int32, int64, float16, bfloat16, and float32.
+ Tensors must not contain NaN, Inf, complex values, or gradient information.
+ The maximum nesting depth of the state is 8.
+ The total number of nodes must not exceed 4096.
+ Attention Calibration
+ For each Attention dataset, the participantвЂ™s hif4_calibration_attention function is called with multiple sets of calibration Q, K, and V data in NVFP4 format, together with the relevant head parameters. The function shall return q_state, k_state, and v_state for subsequent online quantization. The format requirements for these three state parameters are the same as those specified for activation_state.
+ Passing Calibration States to Online Quantization Functions
+ The activation_state generated during calibration will be passed to the participant-provided hif4_dynamic_quantize_activation function. Similarly, q_state, k_state, and v_state will be passed to hif4_dynamic_quantize_q, hif4_dynamic_quantize_k, and hif4_dynamic_quantize_v, respectively.
+ Participants may define the contents of these state parameters and how they are processed. If no state information is required, the corresponding redundant state parameter may be set to None.
+ Linear Online Testing
+ For each test activation sample, the activation_state generated during calibration and the current activation data in NVFP4 format are passed to hif4_dynamic_quantize_activation to obtain the corresponding HiF4 activation quantization parameters.
+ Attention Online Testing
+ For each set of test Q, K, and V data, hif4_dynamic_quantize_q, hif4_dynamic_quantize_k, and hif4_dynamic_quantize_v are called respectively with the corresponding calibration states to obtain the HiF4 quantization parameters for Q, K, and V.
+ Computing the ParticipantвЂ™s Linear Output
+ The HiF4 weight and activation parameters generated by the participant are dequantized, and the Linear output is computed as: X_HIF4@W_HIF4^T
+ Computing the ParticipantвЂ™s Attention Output
+ The HiF4 Q, K, and V parameters generated by the participant are dequantized, and the Attention output is computed as:  гЂ–Attention (QгЂ—_HIF4,K_(HIF4,)^T V_HIF4^T)
+ Computing the Standard HiF4 Baseline
+ The standard HiF4 quantization functions are applied to the same test data to obtain the corresponding standard Linear and Attention outputs.
+ Computing the MSE and Score for Each Test Case
+ The MSE values of both the standard HiF4 output and the participantвЂ™s HiF4 output relative to the reference output computed from the original NVFP4 data are calculated as MSE_STD and MSE_PLAYER, respectively. The score is then calculated as: Score=(MSE_STD-MSE_PLAYER) / MSE_STD
+ Aggregating Scores Across All Test Cases
+ Scores are calculated separately for all Linear and Attention test cases and are then aggregated to obtain the final overall score. Calibration data is used only to generate offline quantization results and the states required for online quantization, and does not directly contribute to the final score.
+ Output Validity and Exception Handling
+ The Weight, Activation, Q, K, and V quantization parameters returned by participants must comply with the HiF4 format requirements, and all calibration states must comply with the data formats permitted by the interface definitions.
+ If any individual test case results in a timeout, runtime exception, missing output, or invalid HiF4 quantization parameters, the submission shall be considered failed.
+API Definition
+Note: Apart from the files and functions explicitly defined in this section, the competition does not restrict other data structures, function interfaces, or implementations. Contestants are not allowed to perform file read/write operations in their code. The competition uses Kunpeng 920B for deploying the evaluation system, providing only Python interfaces.
+[8/20/26 4:16 PM] Ян Сенин: For the list of third-party libraries in the evaluation environment, refer to the compilation and runtime environment specifications.
+
+Python API 
+solution.py 
+filename solution.py
+Member Function Definitions def dequantize_nvfp4(quant_float, scale_float, blk_size=16):
+    C = quant_float.shape[-1]
+    assert C % blk_size == 0, f"Last dim {C} not divisible by NVFP4 block size {blk_size}"
+    x = quant_float.unflatten(-1, (-1, blk_size))
+    sf = scale_float.unsqueeze(-1)
+    result = x * sf
+    result = result.flatten(-2, -1)
+    return result.to(torch.bfloat16)
+ def hif4_calibration_and_quantize_weight(
+    weight_quant: torch.Tensor,
+    weight_scale: torch.Tensor,
+    calib_activation_list: list,
+) -> dict[str, Any]:
+Returns:
+        еї…йЎ»иї”е›ћпјљ
+
+            {
+                "weight_params": HiF4Params,
+                "activation_state": state,
+            }
+
+def hif4_dynamic_quantize_activation(
+    activation_quant: torch.Tensor,
+    activation_scale: torch.Tensor,
+    activation_state: Any,
+) -> dict[str, torch.Tensor]:
+Returns:
+        еЅ“е‰Ќ Activation еЇ№еє”зљ„ HiF4ParamsгЂ‚
+        иѕ“е‡єеЏ‚ж•°зљ„йЂ»иѕ‘ Tensor shape еї…йЎ»дёЋеЅ“е‰Ќ Activation дёЂи‡ґгЂ‚
+
+def hif4_calibration_attention(
+    calib_qkv_list: list,
+    q_num_heads: int,
+    kv_num_heads: int,
+    head_dim: int,
+) -> dict[str, Any]:
+Returns:
+        еї…йЎ»иї”е›ћпјљ
+
+            {
+                "q_state": q_state,
+                "k_state": k_state,
+                "v_state": v_state,
+            }
+
+def hif4_dynamic_quantize_q(
+    q_quant: torch.Tensor,
+    q_scale: torch.Tensor,
+    q_num_heads: int,
+    head_dim: int,
+    q_state: Any,
+) -> dict[str, torch.Tensor]:
+    """еЇ№еЅ“е‰Ќ Query Tensor еЉЁжЂЃз”џж€ђ HiF4 еЏ‚ж•°гЂ‚
+
+    Args:
+        q_quant:
+            Q зљ„ NVFP4 value carrierпјЊshape дёє
+            ``[seq_len, q_num_heads * head_dim]``гЂ‚
+
+        q_scale:
+            Q зљ„ NVFP4 block scaleпјЊshape дёє
+            ``[seq_len, q_num_heads * head_dim // 16]``гЂ‚
+
+        q_num_heads:
+            Query head ж•°гЂ‚
+
+        head_dim:
+            жЇЏдёЄ Query head зљ„з»ґеє¦гЂ‚
+
+        q_state:
+            ``hif4_calibration_attention`` иї”е›ћзљ„ Q calibration stateгЂ‚
+
+    Returns:
+        еЅ“е‰Ќ Q еЇ№еє”зљ„ HiF4ParamsгЂ‚
+    """
+    raise NotImplementedError("Implement hif4_dynamic_quantize_q in your solution.py")
+
+
+
+Scoring Rules
+The preliminary round consists of a single stage.For the Linear scenario, there are 50 groups of data. Each group contains one weight dataset, five calibration datasets, and five test datasets.For the Attention scenario, there are 50 groups of data. Each group consists of three data categories: Q, K, and V. Each category contains five calibration datasets and five test datasets. Calibration datasets are used only for calibration purposes and do not contribute directly to the score. Scores are calculated based on the test datasets, and participants with higher scores will rank higher. Each submission is subject to an overall runtime limit of five minutes. There is no separate runtime limit for individual test cases.
+If multiple teams achieve the same score, the team with the earlier submission time will be ranked higher. If the program exceeds the time limit, encounters compilation or runtime errors, or produces invalid outputs, the submission will be considered invalid.
