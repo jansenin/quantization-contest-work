@@ -10,7 +10,8 @@ relative to `solution/v000-baseline`. They are not official contest scores.
 | `solution/v002-e6m2-neighbors` | Search anchor and adjacent E6M2 ticks for every tensor | `synthetic-v1-b2af837a7a44` | 40 | +12.93% | +8.40% | +9.53% | 0.144 s | experimental; public-only Linear -23.55%; 22/22 legal |
 | `solution/v003-role-gated` | Baseline weight; adjacent-scale search for activation/Q/K/V | `synthetic-v1-b2af837a7a44` | 40 | +10.20% | +8.40% | +8.85% | 0.146 s | superseded; 22/22 legal |
 | `solution/v004-calibration-weighted` | v003 plus fourth-root calibration-energy weighting for the fixed weight hierarchy | `synthetic-v1-b2af837a7a44` | 40 | +10.71% | +8.40% | +8.98% | 0.153 s | superseded; 22/22 legal |
-| `solution/v005-activation-weighted` | v004 plus weight-column-energy weighting for dynamic activation hierarchy selection | `synthetic-v1-b2af837a7a44` | 40 | +12.92% | +8.40% | +9.53% | 0.144 s | current leader; 22/22 legal |
+| `solution/v005-activation-weighted` | v004 plus weight-column-energy weighting for dynamic activation hierarchy selection | `synthetic-v1-b2af837a7a44` | 40 | +12.92% | +8.40% | +9.53% | 0.144 s | superseded; 22/22 legal |
+| `solution/v006-qk-weighted` | v005 plus counterpart-energy weighting for Q/K hierarchy selection | `synthetic-v1-b2af837a7a44` | 40 | +12.92% | +15.19% | +14.62% | 0.145 s | current leader; 22/22 legal |
 
 The extended v002 record includes the ten public cases. Public-only results are
 -23.55% Linear and +19.41% Attention (-2.07% mean), so v002 is not the default
@@ -29,3 +30,7 @@ cases, so they were not promoted.
 The v005 public-only split is +13.52% Linear and +19.41% Attention (+16.46%
 mean). A broader synthetic run also improved overall Linear quality; the main
 residual warning was a small regression on normally distributed Linear cases.
+
+The v006 public-only split is +13.52% Linear and +20.13% Attention (+16.83%
+mean). A separate 90-case synthetic Attention run improved by 4.68 percentage
+points over v004, although mixed-block Attention remained the weakest family.

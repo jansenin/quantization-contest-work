@@ -76,6 +76,51 @@ def _activation_channel_importance(
     return (energy / mean).clamp_min(1e-12).sqrt().clamp(0.1, 10.0).contiguous()
 
 
+def _attention_channel_importance(
+    calib_qkv_list: list,
+    q_num_heads: int,
+    kv_num_heads: int,
+    head_dim: int,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Weight Q/K errors by the mapped counterpart's calibration energy."""
+    if not calib_qkv_list:
+        return None, None
+    repeats = q_num_heads // kv_num_heads
+    q_energy = torch.zeros((kv_num_heads, head_dim), dtype=torch.float64)
+    k_energy = torch.zeros((kv_num_heads, head_dim), dtype=torch.float64)
+    q_count = k_count = 0
+
+    for sample in calib_qkv_list:
+        q = _dequantize_nvfp4(*sample["q"]).double().unflatten(
+            -1, (kv_num_heads, repeats, head_dim)
+        )
+        k = _dequantize_nvfp4(*sample["k"]).double().unflatten(
+            -1, (kv_num_heads, head_dim)
+        )
+        q_prefix = tuple(range(q.ndim - 3))
+        k_prefix = tuple(range(k.ndim - 2))
+        q_energy += q.square().sum(dim=q_prefix + (q.ndim - 2,))
+        k_energy += k.square().sum(dim=k_prefix)
+        q_count += q.numel() // (kv_num_heads * head_dim)
+        k_count += k.numel() // (kv_num_heads * head_dim)
+
+    q_energy /= max(q_count, 1)
+    k_energy /= max(k_count, 1)
+
+    def robust(moment: torch.Tensor) -> torch.Tensor:
+        mean = moment.mean().clamp_min(1e-30)
+        return (
+            (moment / mean)
+            .clamp_min(1e-12)
+            .pow(0.25)
+            .clamp(0.25, 4.0)
+            .to(torch.float32)
+        )
+
+    q_weight = robust(k_energy).repeat_interleave(repeats, dim=0)
+    return q_weight.flatten().contiguous(), robust(q_energy).flatten().contiguous()
+
+
 def _quantize_hif4(
     value: torch.Tensor,
     search_neighbors: bool,
@@ -216,8 +261,10 @@ def hif4_calibration_attention(
     kv_num_heads: int,
     head_dim: int,
 ) -> dict[str, Any]:
-    del calib_qkv_list, q_num_heads, kv_num_heads, head_dim
-    return {"q_state": None, "k_state": None, "v_state": None}
+    q_weight, k_weight = _attention_channel_importance(
+        calib_qkv_list, q_num_heads, kv_num_heads, head_dim
+    )
+    return {"q_state": q_weight, "k_state": k_weight, "v_state": None}
 
 
 def hif4_dynamic_quantize_q(
@@ -227,8 +274,11 @@ def hif4_dynamic_quantize_q(
     head_dim: int,
     q_state: Any,
 ) -> dict[str, torch.Tensor]:
-    del q_num_heads, head_dim, q_state
-    return _convert(q_quant, q_scale)
+    del q_num_heads, head_dim
+    importance = q_state if isinstance(q_state, torch.Tensor) else None
+    if importance is not None and importance.numel() != q_quant.shape[-1]:
+        importance = None
+    return _convert(q_quant, q_scale, channel_weight=importance)
 
 
 def hif4_dynamic_quantize_k(
@@ -238,8 +288,11 @@ def hif4_dynamic_quantize_k(
     head_dim: int,
     k_state: Any,
 ) -> dict[str, torch.Tensor]:
-    del kv_num_heads, head_dim, k_state
-    return _convert(k_quant, k_scale)
+    del kv_num_heads, head_dim
+    importance = k_state if isinstance(k_state, torch.Tensor) else None
+    if importance is not None and importance.numel() != k_quant.shape[-1]:
+        importance = None
+    return _convert(k_quant, k_scale, channel_weight=importance)
 
 
 def hif4_dynamic_quantize_v(

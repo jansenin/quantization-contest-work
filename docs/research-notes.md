@@ -74,6 +74,11 @@ improved canonical Linear by 2.21 percentage points and the five public Linear
 cases by 1.53 points over v004. The calibration state is only one FP32 value per
 input channel, and no value transform is applied.
 
+Paired SmoothQuant-style Linear scaling produced large gains on the single public
+group but regressed broader multi-seed synthetic Linear suites, especially sparse
+and channel-outlier cases. The exact product invariance alone therefore does not
+justify enabling a transform; v005 retains the original values.
+
 ## Attention invariances
 
 For ordinary row-wise softmax attention, paired per-head transforms preserve
@@ -102,6 +107,13 @@ The public Attention sample has stable but nonuniform per-head-dimension energy.
 Calibration/test power correlations are approximately 0.9996 for Q, 0.9995 for K,
 and 0.996 for V. This motivates reciprocal Q/K balancing after the safer local
 scale-search variant is established.
+
+Reciprocal RMS balancing improved the public Attention group but catastrophically
+regressed synthetic mixed-block Attention, so it was rejected. A safer use of the
+same calibration information is to leave Q/K unchanged and weight hierarchy costs:
+Q errors by mapped K energy and K errors by pooled Q energy. A fourth-root mapping
+clamped to `[0.25, 4]` improved canonical Attention by 6.79 percentage points and
+a separate 90-case synthetic Attention suite by 4.68 points over v004.
 
 ## Experiment order
 
