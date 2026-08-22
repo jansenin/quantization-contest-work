@@ -1,9 +1,14 @@
-"""Calibration-weighted HiF4 conversion with role-gated scale search."""
+"""Calibration-weighted HiF4 conversion with role-specific scale search."""
 
 import math
 from typing import Any
 
 import torch
+
+
+_ANCHOR_ONLY = (0,)
+_ADJACENT_SCALES = (0, -1, 1)
+_WIDE_SCALES = (0, -1, 1, 2, 3)
 
 
 def _dequantize_nvfp4(
@@ -123,10 +128,10 @@ def _attention_channel_importance(
 
 def _quantize_hif4(
     value: torch.Tensor,
-    search_neighbors: bool,
+    offsets: tuple[int, ...],
     channel_weight: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Search adjacent E6M2 scales and exactly select each local hierarchy."""
+    """Search E6M2 scale offsets and exactly select each local hierarchy."""
     if value.shape[-1] % 64 != 0:
         raise ValueError("the last dimension must be divisible by 64")
 
@@ -182,7 +187,6 @@ def _quantize_hif4(
         return total_error, scale_lv2, scale_lv3, mant
 
     best_error = best_scale = best_lv2 = best_lv3 = best_mant = None
-    offsets = (0, -1, 1) if search_neighbors else (0,)
     for offset in offsets:
         candidate_scale = _offset_e6m2(anchor, offset)
         error, lv2, lv3, mant = evaluate_scale(candidate_scale)
@@ -209,12 +213,12 @@ def _quantize_hif4(
 def _convert(
     quant: torch.Tensor,
     scale: torch.Tensor,
-    search_neighbors: bool = True,
+    offsets: tuple[int, ...],
     channel_weight: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     return _quantize_hif4(
         _dequantize_nvfp4(quant, scale),
-        search_neighbors=search_neighbors,
+        offsets=offsets,
         channel_weight=channel_weight,
     )
 
@@ -231,7 +235,7 @@ def hif4_calibration_and_quantize_weight(
         "weight_params": _convert(
             weight_quant,
             weight_scale,
-            search_neighbors=False,
+            _ANCHOR_ONLY,
             channel_weight=importance,
         ),
         "activation_state": _activation_channel_importance(
@@ -251,6 +255,7 @@ def hif4_dynamic_quantize_activation(
     return _convert(
         activation_quant,
         activation_scale,
+        _WIDE_SCALES,
         channel_weight=importance,
     )
 
@@ -278,7 +283,7 @@ def hif4_dynamic_quantize_q(
     importance = q_state if isinstance(q_state, torch.Tensor) else None
     if importance is not None and importance.numel() != q_quant.shape[-1]:
         importance = None
-    return _convert(q_quant, q_scale, channel_weight=importance)
+    return _convert(q_quant, q_scale, _ADJACENT_SCALES, channel_weight=importance)
 
 
 def hif4_dynamic_quantize_k(
@@ -292,7 +297,7 @@ def hif4_dynamic_quantize_k(
     importance = k_state if isinstance(k_state, torch.Tensor) else None
     if importance is not None and importance.numel() != k_quant.shape[-1]:
         importance = None
-    return _convert(k_quant, k_scale, channel_weight=importance)
+    return _convert(k_quant, k_scale, _WIDE_SCALES, channel_weight=importance)
 
 
 def hif4_dynamic_quantize_v(
@@ -303,4 +308,4 @@ def hif4_dynamic_quantize_v(
     v_state: Any,
 ) -> dict[str, torch.Tensor]:
     del kv_num_heads, head_dim, v_state
-    return _convert(v_quant, v_scale)
+    return _convert(v_quant, v_scale, _WIDE_SCALES)

@@ -24,6 +24,13 @@ Empirical public-sample measurements found roughly 15-17% lower raw tensor MSE
 from broader scale search. This is not the contest output metric, but it makes a
 small legal-scale neighborhood search the safest first algorithmic variant.
 
+Only larger scales won when the local search was extended beyond adjacent E6M2
+ticks in the tested suites: adding offset `-2` was bitwise inert, while offsets
+`+2` and `+3` were selected by roughly 8-16% of blocks. Offsets beyond `+3` were
+also inert. Widening activation, K, and V while retaining adjacent Q search gave
+nearly the same quality as widening every dynamic role, with materially lower
+runtime. This is empirical pruning, not a guarantee for arbitrary tensors.
+
 ## Linear output error
 
 For `Y = X W^T`, weight-only error is exactly
@@ -114,6 +121,13 @@ same calibration information is to leave Q/K unchanged and weight hierarchy cost
 Q errors by mapped K energy and K errors by pooled Q energy. A fourth-root mapping
 clamped to `[0.25, 4]` improved canonical Attention by 6.79 percentage points and
 a separate 90-case synthetic Attention suite by 4.68 points over v004.
+
+Dynamic key centering is exactly invariant before quantization, but mean, median,
+midpoint, and blended centers all lost to no centering over a 450-case synthetic
+Attention study. Centering enlarged residual block ranges and produced severe
+mixed-block outliers despite improving the single public group, so it is disabled.
+Block-local and narrower Q/K importance mappings were also seed-unstable and did
+not safely improve on the global fourth-root weighting.
 
 ## Experiment order
 
