@@ -129,15 +129,63 @@ mixed-block outliers despite improving the single public group, so it is disable
 Block-local and narrower Q/K importance mappings were also seed-unstable and did
 not safely improve on the global fourth-root weighting.
 
+## Literature map
+
+The closest format reference is Luo et al., [HiFloat4 Format for Language Model
+Inference](https://arxiv.org/abs/2602.11287). Its direct-cast algorithm uses the
+same 64-value E6M2/E1_8/E1_16/S1P2 hierarchy and a `max_abs / 7` scale anchor.
+Its HiGPTQ results also confirm that output-aware reconstruction is an intended
+way to improve over direct casting, rather than merely reducing tensor MSE.
+
+The most relevant method families are:
+
+- GPTQ/OBQ ([GPTQ](https://arxiv.org/abs/2210.17323)) make the full activation
+  covariance the Linear weight-reconstruction objective. The exact objective is
+  applicable here, but a full inverse or sequential compensation is too costly
+  and prone to calibration overfit for the small per-group samples.
+- [AWQ](https://arxiv.org/abs/2306.00978) and
+  [SmoothQuant](https://arxiv.org/abs/2211.10438) motivate activation-aware
+  channel scaling. Their exact paired transform is representable through the
+  calibration state, but our multi-seed experiments rejected it because public
+  gains did not survive sparse and mixed synthetic distributions.
+- [QuaRot](https://arxiv.org/abs/2404.00456),
+  [DuQuant](https://arxiv.org/abs/2406.01721), and NVIDIA's
+  [NVFP4 pretraining study](https://arxiv.org/abs/2509.25149) motivate matched
+  permutations and block-local Hadamard rotations. These transforms preserve the
+  ideal contraction exactly when applied to both operands. Whether they improve
+  this particular hierarchy after quantization is still an empirical question.
+- KIVI ([arXiv:2402.02750](https://arxiv.org/abs/2402.02750)) and
+  SageAttention ([arXiv:2410.02367](https://arxiv.org/abs/2410.02367)) support
+  treating Q, K, and V differently and optimizing Q/K for logit sensitivity.
+  This is consistent with v006's counterpart-energy weighting and v007's
+  role-specific scale-search widths.
+- [SOAR](https://arxiv.org/abs/2605.12245) derives closed-form scale updates for
+  fixed FP4 codes. For fixed HiF4 hierarchy coefficients the corresponding exact
+  update is `s* = sum(w*x*c) / sum(w*c^2)`, followed by E6M2 floor/ceil testing.
+
+SOAR-style coordinate refinement was tested from v007 and rejected. The fitted
+`s*` stayed within about 5% of the anchor while adjacent E6M2 values are 14-25%
+apart. It changed no synthetic scales and only about 0.02% of public activation
+scales; appending it to v007 was bit-for-bit inert. Replacing discrete search by
+the update dropped canonical improvement from 16.61% to about 1.11%. The scale
+cost is non-unimodal because moving the scale can change the hierarchy, so the
+closed-form fixed-code optimum cannot replace direct offset evaluation.
+
+The literature therefore changes the experiment priority, not the proven search
+structure: test exact matched permutations and block-local rotations next; defer
+full covariance, learned affine transforms, and gradient-based calibration until
+they have a strict CPU-cost justification.
+
 ## Experiment order
 
 1. Local E6M2 neighborhood search with exact fixed-scale hierarchy selection.
 2. Calibration-derived diagonal weighting for Linear and counterpart-energy
    weighting for Q/K.
-3. Conservative paired diagonal transforms for Linear and Q/K.
-4. Key centering and matched permutations, gated by broad synthetic results.
-5. Full covariance, rotations, or evolutionary policy search only if simpler
-   methods leave runtime and quality headroom.
+3. Exact matched 16-channel-block permutations, gated by broad synthetic results.
+4. Block-local Hadamard rotations for Linear and Q/K, with V unchanged.
+5. Full covariance or constrained automated policy search only if simpler methods
+   leave runtime and quality headroom. Do not retry rejected diagonal transforms,
+   key centering, or fixed-code analytic scale refinement without new evidence.
 
 The unknown official standard baseline prevents local reproduction of the contest
 score. Local numbers compare tagged variants against `solution/v000-baseline` and
