@@ -61,6 +61,13 @@ Calibration/test channel-power correlation is about 0.99997. This supports testi
 calibration weighting and conservative paired channel balancing, while synthetic
 shift cases are needed to guard against overfitting this single group.
 
+The conservative calibration experiment weights fixed-scale hierarchy decisions
+by the fourth root of mean-normalized channel second moments, clamped to
+`[0.1, 10]`. It improved canonical synthetic Linear by 0.51 percentage points and
+the five public Linear cases by 12.11 points relative to the unweighted v003
+variant. Larger exponents favored the public outlier profile more strongly but
+lost quality on synthetic heavy-tail and sparse cases.
+
 ## Attention invariances
 
 For ordinary row-wise softmax attention, paired per-head transforms preserve

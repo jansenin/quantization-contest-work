@@ -1,5 +1,6 @@
-"""Role-gated NVFP4-to-HiF4 conversion with local E6M2 scale search."""
+"""Calibration-weighted HiF4 conversion with role-gated scale search."""
 
+import math
 from typing import Any
 
 import torch
@@ -41,8 +42,32 @@ def _offset_e6m2(value: torch.Tensor, offset: int) -> torch.Tensor:
     )
 
 
+def _linear_channel_importance(calib_activation_list: list) -> torch.Tensor | None:
+    """Return a conservative calibration-energy weight for each input channel."""
+    moment_sum = None
+    for quant, scale in calib_activation_list:
+        activation = _dequantize_nvfp4(quant, scale)
+        moment = (activation.double() ** 2).mean(
+            dim=tuple(range(activation.ndim - 1))
+        )
+        moment_sum = moment if moment_sum is None else moment_sum + moment
+
+    if moment_sum is None:
+        return None
+    moment = moment_sum / len(calib_activation_list)
+    mean = float(moment.mean().item())
+    if not math.isfinite(mean) or mean <= 0.0:
+        return None
+
+    # The fourth root exploits persistent outlier channels without allowing one
+    # public-style extreme channel to dominate every hierarchy decision.
+    return (moment / mean).clamp_min(1e-12).pow(0.25).clamp(0.1, 10.0)
+
+
 def _quantize_hif4(
-    value: torch.Tensor, search_neighbors: bool
+    value: torch.Tensor,
+    search_neighbors: bool,
+    channel_weight: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Search adjacent E6M2 scales and exactly select each local hierarchy."""
     if value.shape[-1] % 64 != 0:
@@ -50,6 +75,13 @@ def _quantize_hif4(
 
     x = value.to(torch.float32).unflatten(-1, (-1, 8, 2, 4))
     magnitude = x.abs()
+    weight = None
+    if channel_weight is not None:
+        weight = (
+            channel_weight.to(torch.float32)
+            .unflatten(-1, (-1, 8, 2, 4))
+            .expand_as(magnitude)
+        )
 
     # A HiF4 value can reach 1.75 * 2 * 2 = 7 times its block scale.
     anchor = _ceil_e6m2(
@@ -67,10 +99,13 @@ def _quantize_hif4(
                 0,
                 1.75,
             )
-            error1 = ((magnitude - mant1 * base) ** 2).sum(dim=-1, keepdim=True)
-            error2 = ((magnitude - mant2 * base * 2.0) ** 2).sum(
-                dim=-1, keepdim=True
-            )
+            error1 = (magnitude - mant1 * base) ** 2
+            error2 = (magnitude - mant2 * base * 2.0) ** 2
+            if weight is not None:
+                error1 = error1 * weight
+                error2 = error2 * weight
+            error1 = error1.sum(dim=-1, keepdim=True)
+            error2 = error2.sum(dim=-1, keepdim=True)
             use_two = error2 < error1
             lv3 = torch.where(use_two, 2.0, 1.0)
             mant = torch.where(use_two, mant2, mant1)
@@ -115,10 +150,15 @@ def _quantize_hif4(
 
 
 def _convert(
-    quant: torch.Tensor, scale: torch.Tensor, search_neighbors: bool = True
+    quant: torch.Tensor,
+    scale: torch.Tensor,
+    search_neighbors: bool = True,
+    channel_weight: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     return _quantize_hif4(
-        _dequantize_nvfp4(quant, scale), search_neighbors=search_neighbors
+        _dequantize_nvfp4(quant, scale),
+        search_neighbors=search_neighbors,
+        channel_weight=channel_weight,
     )
 
 
@@ -127,10 +167,15 @@ def hif4_calibration_and_quantize_weight(
     weight_scale: torch.Tensor,
     calib_activation_list: list,
 ) -> dict[str, Any]:
-    del calib_activation_list
+    importance = _linear_channel_importance(calib_activation_list)
+    if importance is not None and importance.numel() != weight_quant.shape[-1]:
+        importance = None
     return {
         "weight_params": _convert(
-            weight_quant, weight_scale, search_neighbors=False
+            weight_quant,
+            weight_scale,
+            search_neighbors=False,
+            channel_weight=importance,
         ),
         "activation_state": None,
     }
