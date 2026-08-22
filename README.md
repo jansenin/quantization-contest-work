@@ -39,7 +39,7 @@ Export a tagged candidate without using the working tree:
 
 ```bash
 python3 tools/export_solution.py \
-  --ref solution/v007-akv-wide-search --output solution.zip
+  --ref solution/v008-gated-hadamard --output solution.zip
 ```
 
 The exporter writes a deterministic archive containing only root-level

@@ -86,6 +86,30 @@ group but regressed broader multi-seed synthetic Linear suites, especially spars
 and channel-outlier cases. The exact product invariance alone therefore does not
 justify enabling a transform; v005 retains the original values.
 
+Matched permutations of complete NVFP4 16-value blocks were also tested. They are
+exact and cheap, but changing which four source blocks share a HiF4 scale was
+distribution-dependent: the best Linear permutation gained 4.66 points on the
+ten public cases but lost 0.67 points over a 360-case robust pool, with consistent
+channel-outlier regressions. Permutations within one existing 64-value block are
+bitwise inert because each 16-value unit is exactly two independent lv2 groups.
+
+A fixed matched H64 rotation strongly improved heavy-tail and channel-outlier
+Linear groups but catastrophically damaged sparse and mixed-scale groups. A
+calibration-only gate made the transform safe in the tested suites. Rotation is
+enabled only when all three conditions hold:
+
+```text
+weight kurtosis > 14
+activation zero fraction < 0.5
+std(log2 activation NVFP4 scales) < 1.0
+```
+
+The scale-spread condition is essential: kurtosis alone leaked mixed-block groups
+at larger widths. Thresholds were selected on seeds 0-2 and frozen before seeds
+3-5. Across all six nondegenerate seeds, 36/90 Linear groups rotated and every
+rotated group improved; public data failed the gate and remained bit-identical to
+v007. This is empirical risk gating, not a distribution-independent guarantee.
+
 ## Attention invariances
 
 For ordinary row-wise softmax attention, paired per-head transforms preserve
@@ -172,17 +196,18 @@ cost is non-unimodal because moving the scale can change the hierarchy, so the
 closed-form fixed-code optimum cannot replace direct offset evaluation.
 
 The literature therefore changes the experiment priority, not the proven search
-structure: test exact matched permutations and block-local rotations next; defer
-full covariance, learned affine transforms, and gradient-based calibration until
-they have a strict CPU-cost justification.
+structure. Matched permutations and unconditional block-local rotations have now
+been rejected; only the calibrated Linear gate survived broad testing. Defer full
+covariance, learned affine transforms, and gradient-based calibration until they
+have a strict CPU-cost justification.
 
 ## Experiment order
 
 1. Local E6M2 neighborhood search with exact fixed-scale hierarchy selection.
 2. Calibration-derived diagonal weighting for Linear and counterpart-energy
    weighting for Q/K.
-3. Exact matched 16-channel-block permutations, gated by broad synthetic results.
-4. Block-local Hadamard rotations for Linear and Q/K, with V unchanged.
+3. Calibration-gated block-local Linear rotation, with exact fallback behavior.
+4. Attention-aware covariance or sensitivity objectives without value transforms.
 5. Full covariance or constrained automated policy search only if simpler methods
    leave runtime and quality headroom. Do not retry rejected diagonal transforms,
    key centering, or fixed-code analytic scale refinement without new evidence.

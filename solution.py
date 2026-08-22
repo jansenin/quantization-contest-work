@@ -1,4 +1,4 @@
-"""Calibration-weighted HiF4 conversion with role-specific scale search."""
+"""Calibration-weighted HiF4 conversion with gated Linear rotation."""
 
 import math
 from typing import Any
@@ -9,6 +9,33 @@ import torch
 _ANCHOR_ONLY = (0,)
 _ADJACENT_SCALES = (0, -1, 1)
 _WIDE_SCALES = (0, -1, 1, 2, 3)
+_W_KURTOSIS_THRESHOLD = 14.0
+_ACT_ZERO_FRACTION_THRESHOLD = 0.5
+_ACT_LOG2SCALE_STD_THRESHOLD = 1.0
+
+
+def _build_hadamard() -> torch.Tensor:
+    """Build the normalized 64x64 Sylvester Hadamard matrix."""
+    matrix = torch.ones((1, 1))
+    while matrix.shape[0] < 64:
+        matrix = torch.cat(
+            (
+                torch.cat((matrix, matrix), dim=1),
+                torch.cat((matrix, -matrix), dim=1),
+            ),
+            dim=0,
+        )
+    return matrix / 8.0
+
+
+_H64 = _build_hadamard()
+
+
+def _rotate(value: torch.Tensor, transform: torch.Tensor | None) -> torch.Tensor:
+    """Apply an orthogonal transform independently to each 64-value block."""
+    if transform is None or value.shape[-1] % 64 != 0:
+        return value
+    return value.unflatten(-1, (-1, 64)).matmul(transform).flatten(-2, -1)
 
 
 def _dequantize_nvfp4(
@@ -20,6 +47,42 @@ def _dequantize_nvfp4(
         .unflatten(-1, (-1, 16))
         .mul(scale.to(torch.float32).unsqueeze(-1))
         .flatten(-2, -1)
+    )
+
+
+def _gate_linear(
+    weight_quant: torch.Tensor,
+    weight_scale: torch.Tensor,
+    calib_activation_list: list,
+) -> bool:
+    """Enable rotation only for dense, heavy-tailed, low-spread groups."""
+    if not calib_activation_list:
+        return False
+
+    weight = _dequantize_nvfp4(weight_quant, weight_scale).double()
+    second_moment = weight.square().mean()
+    fourth_moment = weight.pow(4).mean()
+    kurtosis = float(
+        (fourth_moment / (second_moment.square() + 1e-30)).item()
+    )
+
+    activations = [
+        _dequantize_nvfp4(quant, scale).flatten()
+        for quant, scale in calib_activation_list
+    ]
+    activation = torch.cat(activations)
+    zero_fraction = float((activation == 0.0).sum().item()) / max(
+        activation.numel(), 1
+    )
+    scales = torch.cat(
+        [scale.to(torch.float32).flatten() for _, scale in calib_activation_list]
+    )
+    log_scale_std = float(torch.log2(scales.clamp_min(2.0**-60)).std().item())
+
+    return (
+        kurtosis > _W_KURTOSIS_THRESHOLD
+        and zero_fraction < _ACT_ZERO_FRACTION_THRESHOLD
+        and log_scale_std < _ACT_LOG2SCALE_STD_THRESHOLD
     )
 
 
@@ -47,11 +110,13 @@ def _offset_e6m2(value: torch.Tensor, offset: int) -> torch.Tensor:
     )
 
 
-def _linear_channel_importance(calib_activation_list: list) -> torch.Tensor | None:
+def _linear_channel_importance(
+    calib_activation_list: list, transform: torch.Tensor | None = None
+) -> torch.Tensor | None:
     """Return a conservative calibration-energy weight for each input channel."""
     moment_sum = None
     for quant, scale in calib_activation_list:
-        activation = _dequantize_nvfp4(quant, scale)
+        activation = _rotate(_dequantize_nvfp4(quant, scale), transform)
         moment = (activation.double() ** 2).mean(
             dim=tuple(range(activation.ndim - 1))
         )
@@ -70,10 +135,12 @@ def _linear_channel_importance(calib_activation_list: list) -> torch.Tensor | No
 
 
 def _activation_channel_importance(
-    weight_quant: torch.Tensor, weight_scale: torch.Tensor
+    weight_quant: torch.Tensor,
+    weight_scale: torch.Tensor,
+    transform: torch.Tensor | None = None,
 ) -> torch.Tensor | None:
     """Approximate each activation channel's Linear-output sensitivity."""
-    weight = _dequantize_nvfp4(weight_quant, weight_scale)
+    weight = _rotate(_dequantize_nvfp4(weight_quant, weight_scale), transform)
     energy = (weight**2).mean(dim=tuple(range(weight.ndim - 1)))
     mean = float(energy.mean().item())
     if not math.isfinite(mean) or mean <= 0.0:
@@ -215,9 +282,11 @@ def _convert(
     scale: torch.Tensor,
     offsets: tuple[int, ...],
     channel_weight: torch.Tensor | None = None,
+    transform: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
+    value = _rotate(_dequantize_nvfp4(quant, scale), transform)
     return _quantize_hif4(
-        _dequantize_nvfp4(quant, scale),
+        value,
         offsets=offsets,
         channel_weight=channel_weight,
     )
@@ -228,7 +297,12 @@ def hif4_calibration_and_quantize_weight(
     weight_scale: torch.Tensor,
     calib_activation_list: list,
 ) -> dict[str, Any]:
-    importance = _linear_channel_importance(calib_activation_list)
+    transform = (
+        _H64
+        if _gate_linear(weight_quant, weight_scale, calib_activation_list)
+        else None
+    )
+    importance = _linear_channel_importance(calib_activation_list, transform)
     if importance is not None and importance.numel() != weight_quant.shape[-1]:
         importance = None
     return {
@@ -237,10 +311,16 @@ def hif4_calibration_and_quantize_weight(
             weight_scale,
             _ANCHOR_ONLY,
             channel_weight=importance,
+            transform=transform,
         ),
-        "activation_state": _activation_channel_importance(
-            weight_quant, weight_scale
-        ),
+        "activation_state": {
+            "transform": transform,
+            "importance": _activation_channel_importance(
+                weight_quant, weight_scale, transform
+            ),
+        }
+        if transform is not None
+        else _activation_channel_importance(weight_quant, weight_scale),
     }
 
 
@@ -249,7 +329,16 @@ def hif4_dynamic_quantize_activation(
     activation_scale: torch.Tensor,
     activation_state: Any,
 ) -> dict[str, torch.Tensor]:
-    importance = activation_state if isinstance(activation_state, torch.Tensor) else None
+    transform = None
+    if type(activation_state) is dict:
+        transform = activation_state.get("transform")
+        importance = activation_state.get("importance")
+    else:
+        importance = activation_state if isinstance(activation_state, torch.Tensor) else None
+    if not isinstance(transform, torch.Tensor):
+        transform = None
+    if not isinstance(importance, torch.Tensor):
+        importance = None
     if importance is not None and importance.numel() != activation_quant.shape[-1]:
         importance = None
     return _convert(
@@ -257,6 +346,7 @@ def hif4_dynamic_quantize_activation(
         activation_scale,
         _WIDE_SCALES,
         channel_weight=importance,
+        transform=transform,
     )
 
 

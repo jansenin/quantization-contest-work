@@ -12,7 +12,8 @@ relative to `solution/v000-baseline`. They are not official contest scores.
 | `solution/v004-calibration-weighted` | v003 plus fourth-root calibration-energy weighting for the fixed weight hierarchy | `synthetic-v1-b2af837a7a44` | 40 | +10.71% | +8.40% | +8.98% | 0.153 s | superseded; 22/22 legal |
 | `solution/v005-activation-weighted` | v004 plus weight-column-energy weighting for dynamic activation hierarchy selection | `synthetic-v1-b2af837a7a44` | 40 | +12.92% | +8.40% | +9.53% | 0.144 s | superseded; 22/22 legal |
 | `solution/v006-qk-weighted` | v005 plus counterpart-energy weighting for Q/K hierarchy selection | `synthetic-v1-b2af837a7a44` | 40 | +12.92% | +15.19% | +14.62% | 0.145 s | runtime-safe fallback; 22/22 legal |
-| `solution/v007-akv-wide-search` | v006 plus E6M2 offsets `+2,+3` for activation/K/V, retaining adjacent Q search | `synthetic-v1-b2af837a7a44` | 40 | +14.97% | +17.16% | +16.61% | 0.209 s | current quality leader; 22/22 legal |
+| `solution/v007-akv-wide-search` | v006 plus E6M2 offsets `+2,+3` for activation/K/V, retaining adjacent Q search | `synthetic-v1-b2af837a7a44` | 40 | +14.97% | +17.16% | +16.61% | 0.209 s | superseded; 22/22 legal |
+| `solution/v008-gated-hadamard` | v007 plus calibration-gated block-local H64 rotation for Linear only | `synthetic-v1-b2af837a7a44` | 40 | +22.08% | +17.16% | +18.39% | 0.228 s | current quality leader; 22/22 legal |
 
 The extended v002 record includes the ten public cases. Public-only results are
 -23.55% Linear and +19.41% Attention (-2.07% mean), so v002 is not the default
@@ -42,3 +43,12 @@ percentage points on average. Widening Q as well gave negligible quality gain bu
 reduced the projected five-minute runtime margin; v007 therefore widens only
 activation, K, and V. A public-shape 50+50 projection used about 81% of the local
 budget, so v006 remains the conservative runtime fallback for a slower judge CPU.
+
+The v008 gate enables matched Linear rotation only when weight kurtosis is above
+14, calibration activation zero fraction is below 0.5, and the standard deviation
+of log2 NVFP4 activation scales is below 1.0. It is otherwise bit-identical to
+v007, including all Attention paths. On six nondegenerate robust seeds the gate
+rotated 36 of 90 Linear groups; every rotated group improved, raising Linear from
+13.33% to 29.21% without worsening the worst case. The public group does not pass
+the gate, so its public-only result remains exactly v007's +21.07% overall. A
+sequential local projection used about 52% of the five-minute budget.
