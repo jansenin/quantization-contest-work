@@ -1,4 +1,4 @@
-"""NVFP4-to-HiF4 conversion using the reference BF16 source semantics."""
+"""NVFP4-to-HiF4 conversion with a local E6M2 scale search."""
 
 from typing import Any
 
@@ -14,8 +14,6 @@ def _dequantize_nvfp4(
         .unflatten(-1, (-1, 16))
         .mul(scale.to(torch.float32).unsqueeze(-1))
         .flatten(-2, -1)
-        .to(torch.bfloat16)
-        .to(torch.float32)
     )
 
 
@@ -28,8 +26,23 @@ def _ceil_e6m2(value: torch.Tensor) -> torch.Tensor:
     return (torch.ceil(value / step) * step).clamp(max=49152.0)
 
 
+def _offset_e6m2(value: torch.Tensor, offset: int) -> torch.Tensor:
+    """Move an exact E6M2 value by a signed number of legal lattice ticks."""
+    exponent = torch.floor(torch.log2(value))
+    step = torch.pow(2.0, exponent - 2.0)
+    significand = torch.round(value / step).to(torch.int64)
+    index = ((exponent.to(torch.int64) + 48) * 4 + significand - 4 + offset).clamp(
+        0, 254
+    )
+    new_exponent = torch.div(index, 4, rounding_mode="floor") - 48
+    new_significand = index.remainder(4) + 4
+    return new_significand.to(torch.float32) * torch.pow(
+        2.0, new_exponent.to(torch.float32) - 2.0
+    )
+
+
 def _quantize_hif4(value: torch.Tensor) -> dict[str, torch.Tensor]:
-    """Quantize each 64-value block and greedily select its hierarchy."""
+    """Search adjacent E6M2 scales and exactly select each local hierarchy."""
     if value.shape[-1] % 64 != 0:
         raise ValueError("the last dimension must be divisible by 64")
 
@@ -37,44 +50,64 @@ def _quantize_hif4(value: torch.Tensor) -> dict[str, torch.Tensor]:
     magnitude = x.abs()
 
     # A HiF4 value can reach 1.75 * 2 * 2 = 7 times its block scale.
-    scale_factor = _ceil_e6m2(
+    anchor = _ceil_e6m2(
         magnitude.amax(dim=(-3, -2, -1), keepdim=True) / 7.0
     )
 
-    def evaluate_lv2(lv2: float):
-        base = scale_factor * lv2
-        mant1 = torch.clamp(torch.round(magnitude / base * 4.0) / 4.0, 0, 1.75)
-        mant2 = torch.clamp(
-            torch.round(magnitude / (base * 2.0) * 4.0) / 4.0,
-            0,
-            1.75,
-        )
-        error1 = ((magnitude - mant1 * base) ** 2).sum(dim=-1, keepdim=True)
-        error2 = ((magnitude - mant2 * base * 2.0) ** 2).sum(
-            dim=-1, keepdim=True
-        )
-        use_two = error2 < error1
-        lv3 = torch.where(use_two, 2.0, 1.0)
-        mant = torch.where(use_two, mant2, mant1)
-        error = torch.where(use_two, error2, error1).sum(
-            dim=(-2, -1), keepdim=True
-        )
-        return error, lv3, mant
+    def evaluate_scale(scale_factor: torch.Tensor):
+        def evaluate_lv2(lv2: float):
+            base = scale_factor * lv2
+            mant1 = torch.clamp(
+                torch.round(magnitude / base * 4.0) / 4.0, 0, 1.75
+            )
+            mant2 = torch.clamp(
+                torch.round(magnitude / (base * 2.0) * 4.0) / 4.0,
+                0,
+                1.75,
+            )
+            error1 = ((magnitude - mant1 * base) ** 2).sum(dim=-1, keepdim=True)
+            error2 = ((magnitude - mant2 * base * 2.0) ** 2).sum(
+                dim=-1, keepdim=True
+            )
+            use_two = error2 < error1
+            lv3 = torch.where(use_two, 2.0, 1.0)
+            mant = torch.where(use_two, mant2, mant1)
+            error = torch.where(use_two, error2, error1).sum(
+                dim=(-2, -1), keepdim=True
+            )
+            return error, lv3, mant
 
-    error1, lv3_for_1, mant_for_1 = evaluate_lv2(1.0)
-    error2, lv3_for_2, mant_for_2 = evaluate_lv2(2.0)
-    use_lv2_two = error2 < error1
+        error1, lv3_for_1, mant_for_1 = evaluate_lv2(1.0)
+        error2, lv3_for_2, mant_for_2 = evaluate_lv2(2.0)
+        use_lv2_two = error2 < error1
+        group_error = torch.where(use_lv2_two, error2, error1)
+        total_error = group_error.sum(dim=(-3, -2, -1), keepdim=True)
+        scale_lv2 = torch.where(use_lv2_two, 2.0, 1.0)
+        scale_lv3 = torch.where(use_lv2_two, lv3_for_2, lv3_for_1)
+        mant = torch.where(use_lv2_two, mant_for_2, mant_for_1)
+        return total_error, scale_lv2, scale_lv3, mant
 
-    scale_lv2 = torch.where(use_lv2_two, 2.0, 1.0)
-    scale_lv3 = torch.where(use_lv2_two, lv3_for_2, lv3_for_1)
-    mant = torch.where(use_lv2_two, mant_for_2, mant_for_1)
+    best_error = best_scale = best_lv2 = best_lv3 = best_mant = None
+    for offset in (0, -1, 1):
+        candidate_scale = _offset_e6m2(anchor, offset)
+        error, lv2, lv3, mant = evaluate_scale(candidate_scale)
+        if best_error is None:
+            best_error, best_scale = error, candidate_scale
+            best_lv2, best_lv3, best_mant = lv2, lv3, mant
+            continue
+        use_candidate = error < best_error
+        best_error = torch.where(use_candidate, error, best_error)
+        best_scale = torch.where(use_candidate, candidate_scale, best_scale)
+        best_lv2 = torch.where(use_candidate, lv2, best_lv2)
+        best_lv3 = torch.where(use_candidate, lv3, best_lv3)
+        best_mant = torch.where(use_candidate, mant, best_mant)
 
     return {
-        "scale_factor": scale_factor,
-        "scale_lv2": scale_lv2,
-        "scale_lv3": scale_lv3,
+        "scale_factor": best_scale,
+        "scale_lv2": best_lv2,
+        "scale_lv3": best_lv3,
         "sign": torch.sign(x),
-        "mant": mant,
+        "mant": best_mant,
     }
 
 
