@@ -1,4 +1,4 @@
-"""Simple NVFP4-to-HiF4 baseline for the Huawei preliminary round."""
+"""NVFP4-to-HiF4 conversion using the reference BF16 source semantics."""
 
 from typing import Any
 
@@ -14,6 +14,8 @@ def _dequantize_nvfp4(
         .unflatten(-1, (-1, 16))
         .mul(scale.to(torch.float32).unsqueeze(-1))
         .flatten(-2, -1)
+        .to(torch.bfloat16)
+        .to(torch.float32)
     )
 
 

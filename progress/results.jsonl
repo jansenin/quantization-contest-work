@@ -1,1 +1,2 @@
 {"variant":"v000-baseline","commit":"21225c054897cc8cede0023b49e42781ecff2a82","suite":"synthetic-v1-b2af837a7a44","mean_improvement_percent":0.0,"case_count":40,"runtime":0.264834668,"status":"ok","timestamp":"2026-08-22T14:56:15.351264+00:00","ts":"2026-08-22T14:56:15.351264+00:00"}
+{"variant":"v001-bf16-target","commit":"solution.py","suite":"synthetic-v1-b2af837a7a44","mean_improvement_percent":-0.912874203,"case_count":40,"runtime":0.262370361,"status":"ok","timestamp":"2026-08-22T14:58:51.843238+00:00","ts":"2026-08-22T14:58:51.843238+00:00"}
