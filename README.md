@@ -35,6 +35,16 @@ unavailable official score.
 4. Commit the solution and its benchmark record together.
 5. Create an annotated `solution/vNNN-name` tag.
 
+Export a tagged candidate without using the working tree:
+
+```bash
+python3 tools/export_solution.py \
+  --ref solution/v007-akv-wide-search --output solution.zip
+```
+
+The exporter writes a deterministic archive containing only root-level
+`solution.py` and prints the source and archive SHA-256 hashes.
+
 Contract details and evaluator assumptions are in `docs/problem-contract.md`.
 Proved optimization facts and experiment priorities are in
 `docs/research-notes.md`.
