@@ -1,4 +1,4 @@
-"""NVFP4-to-HiF4 conversion with a local E6M2 scale search."""
+"""Role-gated NVFP4-to-HiF4 conversion with local E6M2 scale search."""
 
 from typing import Any
 
@@ -41,7 +41,9 @@ def _offset_e6m2(value: torch.Tensor, offset: int) -> torch.Tensor:
     )
 
 
-def _quantize_hif4(value: torch.Tensor) -> dict[str, torch.Tensor]:
+def _quantize_hif4(
+    value: torch.Tensor, search_neighbors: bool
+) -> dict[str, torch.Tensor]:
     """Search adjacent E6M2 scales and exactly select each local hierarchy."""
     if value.shape[-1] % 64 != 0:
         raise ValueError("the last dimension must be divisible by 64")
@@ -88,7 +90,8 @@ def _quantize_hif4(value: torch.Tensor) -> dict[str, torch.Tensor]:
         return total_error, scale_lv2, scale_lv3, mant
 
     best_error = best_scale = best_lv2 = best_lv3 = best_mant = None
-    for offset in (0, -1, 1):
+    offsets = (0, -1, 1) if search_neighbors else (0,)
+    for offset in offsets:
         candidate_scale = _offset_e6m2(anchor, offset)
         error, lv2, lv3, mant = evaluate_scale(candidate_scale)
         if best_error is None:
@@ -111,8 +114,12 @@ def _quantize_hif4(value: torch.Tensor) -> dict[str, torch.Tensor]:
     }
 
 
-def _convert(quant: torch.Tensor, scale: torch.Tensor) -> dict[str, torch.Tensor]:
-    return _quantize_hif4(_dequantize_nvfp4(quant, scale))
+def _convert(
+    quant: torch.Tensor, scale: torch.Tensor, search_neighbors: bool = True
+) -> dict[str, torch.Tensor]:
+    return _quantize_hif4(
+        _dequantize_nvfp4(quant, scale), search_neighbors=search_neighbors
+    )
 
 
 def hif4_calibration_and_quantize_weight(
@@ -122,7 +129,9 @@ def hif4_calibration_and_quantize_weight(
 ) -> dict[str, Any]:
     del calib_activation_list
     return {
-        "weight_params": _convert(weight_quant, weight_scale),
+        "weight_params": _convert(
+            weight_quant, weight_scale, search_neighbors=False
+        ),
         "activation_state": None,
     }
 
