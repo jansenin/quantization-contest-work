@@ -64,6 +64,18 @@ def _linear_channel_importance(calib_activation_list: list) -> torch.Tensor | No
     return (moment / mean).clamp_min(1e-12).pow(0.25).clamp(0.1, 10.0)
 
 
+def _activation_channel_importance(
+    weight_quant: torch.Tensor, weight_scale: torch.Tensor
+) -> torch.Tensor | None:
+    """Approximate each activation channel's Linear-output sensitivity."""
+    weight = _dequantize_nvfp4(weight_quant, weight_scale)
+    energy = (weight**2).mean(dim=tuple(range(weight.ndim - 1)))
+    mean = float(energy.mean().item())
+    if not math.isfinite(mean) or mean <= 0.0:
+        return None
+    return (energy / mean).clamp_min(1e-12).sqrt().clamp(0.1, 10.0).contiguous()
+
+
 def _quantize_hif4(
     value: torch.Tensor,
     search_neighbors: bool,
@@ -177,7 +189,9 @@ def hif4_calibration_and_quantize_weight(
             search_neighbors=False,
             channel_weight=importance,
         ),
-        "activation_state": None,
+        "activation_state": _activation_channel_importance(
+            weight_quant, weight_scale
+        ),
     }
 
 
@@ -186,8 +200,14 @@ def hif4_dynamic_quantize_activation(
     activation_scale: torch.Tensor,
     activation_state: Any,
 ) -> dict[str, torch.Tensor]:
-    del activation_state
-    return _convert(activation_quant, activation_scale)
+    importance = activation_state if isinstance(activation_state, torch.Tensor) else None
+    if importance is not None and importance.numel() != activation_quant.shape[-1]:
+        importance = None
+    return _convert(
+        activation_quant,
+        activation_scale,
+        channel_weight=importance,
+    )
 
 
 def hif4_calibration_attention(

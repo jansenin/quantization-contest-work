@@ -68,6 +68,12 @@ the five public Linear cases by 12.11 points relative to the unweighted v003
 variant. Larger exponents favored the public outlier profile more strongly but
 lost quality on synthetic heavy-tail and sparse cases.
 
+Dynamic activation hierarchy decisions can use the fixed weight's column energy
+as a diagonal output-error proxy. A square-root mapping clamped to `[0.1, 10]`
+improved canonical Linear by 2.21 percentage points and the five public Linear
+cases by 1.53 points over v004. The calibration state is only one FP32 value per
+input channel, and no value transform is applied.
+
 ## Attention invariances
 
 For ordinary row-wise softmax attention, paired per-head transforms preserve

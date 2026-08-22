@@ -251,6 +251,23 @@ def assert_state_legal(test, state, tag=""):
     test.assertEqual(errors, [], "; ".join(errors[:5]))
 
 
+def assert_state_equal(test, left, right):
+    """Compare deterministic calibration states, including nested tensors."""
+    test.assertIs(type(left), type(right))
+    if type(left) is torch.Tensor:
+        test.assertTrue(torch.equal(left, right))
+    elif type(left) is dict:
+        test.assertEqual(left.keys(), right.keys())
+        for key in left:
+            assert_state_equal(test, left[key], right[key])
+    elif type(left) is list or type(left) is tuple:
+        test.assertEqual(len(left), len(right))
+        for left_item, right_item in zip(left, right):
+            assert_state_equal(test, left_item, right_item)
+    else:
+        test.assertEqual(left, right)
+
+
 def assert_hif4_params_legal(test, params, shape, tag=""):
     """Full HiF4 output-format validation (shapes, values, finiteness)."""
     expected = _expected_hif4_shapes(shape)
@@ -998,7 +1015,7 @@ class TestSolutionStability(unittest.TestCase):
         self.assertTrue(
             self._params_equal(r1["weight_params"], r2["weight_params"])
         )
-        self.assertEqual(r1["activation_state"], r2["activation_state"])
+        assert_state_equal(self, r1["activation_state"], r2["activation_state"])
 
     def test_activation_no_mutation_and_deterministic(self):
         group = self._linear_case()
@@ -1021,7 +1038,11 @@ class TestSolutionStability(unittest.TestCase):
                 self.assertTrue(torch.equal(s[role][1], s0[role][1]),
                                 f"calib[{i}].{role}")
         for role in ("q", "k", "v"):
-            self.assertEqual(r1[f"{role}_state"], r2[f"{role}_state"])
+            assert_state_equal(
+                test=self,
+                left=r1[f"{role}_state"],
+                right=r2[f"{role}_state"],
+            )
 
     def test_qkv_no_mutation_and_deterministic(self):
         group = self._attention_case(kv=2)
