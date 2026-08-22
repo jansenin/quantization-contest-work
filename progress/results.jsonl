@@ -1,1 +1,1 @@
-{"variant":"v000-baseline","commit":"","case_count":0,"runtime":0,"status":"awaiting benchmark","ts":"2026-08-22T00:00:00Z"}
+{"variant":"v000-baseline","commit":"21225c054897cc8cede0023b49e42781ecff2a82","suite":"synthetic-v1-b2af837a7a44","mean_improvement_percent":0.0,"case_count":40,"runtime":0.264834668,"status":"ok","timestamp":"2026-08-22T14:56:15.351264+00:00","ts":"2026-08-22T14:56:15.351264+00:00"}
