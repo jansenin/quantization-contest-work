@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+*.swp
+*.swo
 
 # Generated submission artifact; the separate submission repo tracks it.
 /solution.zip

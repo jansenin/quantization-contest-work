@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Per-variant mean MSE improvement dashboard for the NVFP4-to-HiF4 quantization contest, preliminary round.">
+<title>Variant Benchmark Panel · NVFP4→HiF4</title>
+<style>
+  :root {
+    --paper: #e9eef4;          /* cool light blue-gray paper */
+    --paper-2: #dfe7ee;        /* panel face */
+    --ink: #16283e;            /* dark navy text */
+    --ink-soft: #47607a;
+    --hair: #c2cfdc;           /* hairline */
+    --hair-strong: #92a6ba;
+    --trace: #e05a12;          /* orange trace */
+    --ok: #1f6f4a;
+    --warn: #9a6700;
+    --bad: #a1251b;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas,
+            "Liberation Mono", "DejaVu Sans Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { color-scheme: light; }
+
+  body {
+    margin: 0;
+    background:
+      linear-gradient(rgba(22, 40, 62, 0.028) 1px, transparent 1px) 0 0 / 100% 26px,
+      var(--paper);
+    color: var(--ink);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  :focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+  .frame { max-width: 1000px; margin: 0 auto; padding: 30px 20px 64px; }
+
+  /* ---- faceplate ---- */
+  .plate { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 6px; }
+  .plate-top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--hair); padding-bottom: 7px; margin-bottom: 14px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-soft);
+  }
+  h1 { font-size: 24px; line-height: 1.15; margin: 0 0 6px; font-weight: 600; letter-spacing: 0.01em; }
+  .lede { margin: 0; color: var(--ink-soft); max-width: 64ch; }
+
+  .dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; vertical-align: 1px; background: var(--warn); }
+  .dot.ok  { background: var(--ok); }
+  .dot.warn{ background: var(--warn); }
+  .dot.err { background: var(--bad); }
+  #status { white-space: normal; }
+
+  /* ---- sections ---- */
+  section { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--hair); }
+  h2 {
+    display: flex; align-items: center; gap: 9px;
+    margin: 0 0 12px;
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-soft);
+  }
+  h2::before { content: ""; width: 7px; height: 7px; background: var(--trace); }
+  .count { margin-left: auto; color: var(--hair-strong); letter-spacing: 0.08em; }
+
+  /* ---- plot ---- */
+  #chart { width: 100%; }
+  #chart:empty { display: none; }
+  .plot { display: block; background: var(--paper-2); border: 1px solid var(--hair-strong); }
+  .plot .grid   { stroke: #c8d3de; stroke-width: 1; }
+  .plot .grid.base { stroke: #8ea3b8; stroke-dasharray: 4 3; }
+  .plot .trace  { fill: none; stroke: var(--trace); stroke-width: 1.8; stroke-linejoin: round; }
+  .plot .pt     { fill: var(--trace); }
+  .plot .pt-pending { fill: none; stroke: #8ea3b8; }
+  .plot .axis   { font-family: var(--mono); font-size: 10px; fill: var(--ink-soft); }
+  .plot .val    { font-family: var(--mono); font-size: 10px; fill: var(--ink); }
+  .plot .xlab   { font-family: var(--mono); font-size: 10px; fill: var(--ink-soft); }
+  .plot .atitle { font-family: var(--mono); font-size: 10px; letter-spacing: 0.09em; fill: var(--ink-soft); text-transform: uppercase; }
+
+  /* ---- metric ---- */
+  .formula {
+    font-family: var(--mono); font-size: 13px;
+    background: var(--paper-2); border: 1px solid var(--hair);
+    padding: 10px 12px; overflow-x: auto; margin: 0 0 10px;
+  }
+  .formula sub { font-size: 0.75em; }
+  ul.terms { margin: 0 0 0 2px; padding-left: 18px; color: var(--ink); }
+  ul.terms li { margin: 3px 0; }
+  ul.terms code { font-family: var(--mono); font-size: 12px; background: transparent; }
+
+  /* ---- raw table ---- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--hair-strong); background: var(--paper-2); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; min-width: 680px; }
+  th {
+    text-align: left; padding: 7px 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft); border-bottom: 1px solid var(--hair-strong);
+  }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: rgba(224, 90, 18, 0.05); }
+  th.num, td.num { text-align: right; }
+  td.dim { color: var(--ink-soft); font-size: 11px; }
+
+  .st {
+    padding: 1px 6px; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+    border: 1px solid var(--hair-strong);
+  }
+  .st-ok   { color: var(--ok);   border-color: rgba(31, 111, 74, 0.45);  background: rgba(31, 111, 74, 0.06); }
+  .st-warn { color: var(--warn); border-color: rgba(154, 103, 0, 0.45);  background: rgba(154, 103, 0, 0.07); }
+  .st-bad  { color: var(--bad);  border-color: rgba(161, 37, 27, 0.45);  background: rgba(161, 37, 27, 0.06); }
+
+  footer {
+    margin-top: 30px; padding-top: 10px; border-top: 1px solid var(--hair);
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-soft);
+  }
+
+  .empty { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); border: 1px dashed var(--hair-strong); background: var(--paper-2); padding: 16px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  @media (max-width: 640px) {
+    .frame { padding: 18px 12px 48px; }
+    h1 { font-size: 19px; }
+    .formula { font-size: 11.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <header class="plate">
+    <div class="plate-top">
+      <span>Huawei prelim · NVFP4 → HiF4 conversion</span>
+      <span role="status" aria-live="polite" id="statusbar">
+        <i class="dot warn" id="status-dot" aria-hidden="true"></i><span id="status">loading results.jsonl …</span>
+      </span>
+    </div>
+    <h1>Variant Benchmark Panel</h1>
+    <p class="lede">Per-variant mean MSE improvement over the standard HiF4 baseline, in submission order. Kunpeng 920B CPU · FP32 outputs vs the NVFP4 reference.</p>
+  </header>
+
+  <main>
+    <section aria-labelledby="plot-h">
+      <h2 id="plot-h">Plot</h2>
+      <div id="chart" role="img" aria-label="Variant mean improvement over baseline, chronological." aria-describedby="chart-sr"></div>
+      <p class="sr-only" id="chart-sr"></p>
+    </section>
+
+    <section aria-labelledby="metric-h">
+      <h2 id="metric-h">Metric</h2>
+      <p class="formula">
+        mean_improvement_percent = mean<sub>test cases</sub>&thinsp;[ 100 &times; (baseline_mse &minus; current_mse) / baseline_mse ]
+      </p>
+      <ul class="terms">
+        <li><code>baseline_mse</code> — MSE of the standard HiF4 baseline output vs the NVFP4 reference output, per test case</li>
+        <li><code>current_mse</code> — MSE of this variant's output vs the same reference, per test case</li>
+        <li>positive &rarr; better than baseline; 0 &rarr; parity; negative &rarr; regression. Baseline (v000) sits at 0 by definition.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="raw-h">
+      <h2 id="raw-h">Raw results <span class="count" id="counter"></span></h2>
+      <div class="tbl-wrap">
+        <table>
+          <caption class="sr-only">Raw benchmark rows in chronological order.</caption>
+          <thead>
+            <tr>
+              <th scope="col">variant</th>
+              <th scope="col">commit</th>
+              <th scope="col">suite</th>
+              <th scope="col" class="num">mean %</th>
+              <th scope="col" class="num">cases</th>
+              <th scope="col" class="num">runtime</th>
+              <th scope="col">status</th>
+              <th scope="col">ts</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>source: progress/results.jsonl</span>
+    <span>metric: 100·(baseline_mse − current_mse)/baseline_mse, mean over cases</span>
+  </footer>
+
+</div>
+
+<noscript>
+  <p class="empty" style="max-width:1000px;margin:20px auto;">This panel needs JavaScript to fetch and plot results.jsonl. It is served with <code>python -m http.server</code>.</p>
+</noscript>
+
+<script>
+(function () {
+  'use strict';
+
+  var els = {
+    status: document.getElementById('status'),
+    dot: document.getElementById('status-dot'),
+    chart: document.getElementById('chart'),
+    chartSr: document.getElementById('chart-sr'),
+    tbody: document.getElementById('tbody'),
+    counter: document.getElementById('counter')
+  };
+
+  var DONE_RE = /^(ok|done|passed|complete|success|finished)$/i;
+  var rows = [];
+  var rto = null;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function num(v) {
+    if (v === null || v === undefined || v === '') return NaN;
+    var n = typeof v === 'number' ? v : Number(String(v).trim());
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function normalize(o) {
+    return {
+      variant: (o.variant !== undefined && o.variant !== null) ? String(o.variant) : '\u2014',
+      commit:  (o.commit  !== undefined && o.commit  !== null) ? String(o.commit)  : '\u2014',
+      suite:   (o.suite   !== undefined && o.suite   !== null) ? String(o.suite)   : '',
+      mean:    num(o.mean_improvement_percent !== undefined ? o.mean_improvement_percent : o.mean),
+      cases:   num(o.case_count !== undefined ? o.case_count : o.cases),
+      runtime: num(o.runtime !== undefined ? o.runtime : o.time_seconds),
+      status:  (o.status !== undefined && o.status !== null) ? String(o.status) : '',
+      ts:      (o.ts !== undefined ? String(o.ts)
+               : o.timestamp !== undefined ? String(o.timestamp) : '')
+    };
+  }
+
+  function setStatus(cls, msg) {
+    els.dot.className = 'dot ' + cls;
+    els.status.textContent = msg;
+  }
+
+  /* ---------- chart ---------- */
+
+  function niceTicks(min, max, n) {
+    var span = max - min;
+    if (!Number.isFinite(span) || span <= 0) return [{ v: 0, label: '0' }];
+    var mag = Math.pow(10, Math.floor(Math.log10(span / n)));
+    var norm = (span / n) / mag;
+    var step = norm >= 5 ? 5 : norm >= 2.5 ? 2.5 : norm >= 2 ? 2 : 1;
+    step *= mag;
+    var dec = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+    var lo = Math.floor(min / step) * step;
+    var hi = Math.ceil(max / step) * step;
+    var out = [];
+    for (var v = lo; v <= hi + step * 1e-6; v += step) {
+      out.push({ v: v, label: String(parseFloat(v.toFixed(dec))) });
+    }
+    return out;
+  }
+
+  function shortName(v) { return v.length > 10 ? v.slice(0, 9) + '\u2026' : v; }
+  function shortCommit(c) { return c.length > 9 ? c.slice(0, 7) : c; }
+  function fmtMean(v)  { return Number.isFinite(v) ? v.toFixed(2) + ' %' : '\u2014'; }
+  function fmtInt(v)   { return Number.isFinite(v) ? String(Math.round(v)) : '\u2014'; }
+  function fmtTime(s) {
+    if (!Number.isFinite(s)) return '\u2014';
+    if (s >= 60) {
+      var m = Math.floor(s / 60), rem = s - m * 60;
+      return m + 'm ' + (rem < 10 ? '0' : '') + rem.toFixed(1) + 's';
+    }
+    return s.toFixed(1) + ' s';
+  }
+  function fmtStatus(s) { return s ? String(s).toLowerCase().replace(/[_-]+/g, ' ') : '\u2014'; }
+  function statusClass(s) {
+    if (!s) return '';
+    if (DONE_RE.test(s)) return 'ok';
+    if (/await|pending|queued|running/i.test(s)) return 'warn';
+    if (/fail|error|invalid|crash|timeout/i.test(s)) return 'bad';
+    return '';
+  }
+
+  function renderChart() {
+    var host = els.chart;
+    var w = host.clientWidth;
+    if (w < 120) return;
+    var h = Math.round(Math.min(430, Math.max(230, w * 0.5)));
+    host.style.height = h + 'px';
+
+    var pad = { l: 48, r: 16, t: 24, b: 42 };
+    var pw = w - pad.l - pad.r;
+    var ph = h - pad.t - pad.b;
+
+    if (!rows.length) {
+      host.innerHTML = '<p class="empty">No data \u2014 add rows to results.jsonl and reload.</p>';
+      return;
+    }
+
+    var measured = [], pending = [], i;
+    for (i = 0; i < rows.length; i++) {
+      (Number.isFinite(rows[i].mean) ? measured : pending).push(i);
+    }
+
+    var lo = 0, hi = 0;
+    for (i = 0; i < measured.length; i++) {
+      var m = rows[measured[i]].mean;
+      lo = Math.min(lo, m); hi = Math.max(hi, m);
+    }
+    if (hi - lo < 1e-9) { lo = -1; hi = 1; }
+    var padY = (hi - lo) * 0.14;
+    lo -= padY; hi += padY;
+
+    var ticks = niceTicks(lo, hi, 5);
+    var y = function (v) { return pad.t + ph * (1 - (v - lo) / (hi - lo)); };
+    var x = function (idx) {
+      return pad.l + (rows.length === 1 ? pw / 2 : pw * idx / (rows.length - 1));
+    };
+    var y0 = y(0);
+
+    var s = '';
+    s += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h +
+         '" viewBox="0 0 ' + w + ' ' + h + '" class="plot" role="presentation">';
+
+    // grid + y labels
+    for (i = 0; i < ticks.length; i++) {
+      var yv = y(ticks[i].v);
+      s += '<line class="grid" x1="' + pad.l + '" y1="' + yv + '" x2="' + (w - pad.r) + '" y2="' + yv + '"/>';
+      s += '<text class="axis" x="' + (pad.l - 8) + '" y="' + (yv + 3.5) + '" text-anchor="end">' +
+           esc(ticks[i].label) + '</text>';
+    }
+    s += '<line class="grid base" x1="' + pad.l + '" y1="' + y0 + '" x2="' + (w - pad.r) + '" y2="' + y0 + '"/>';
+
+    // trace through measured rows, chronological
+    if (measured.length > 1) {
+      var pts = [];
+      for (i = 0; i < measured.length; i++) {
+        var ix = measured[i];
+        pts.push(x(ix).toFixed(1) + ',' + y(rows[ix].mean).toFixed(1));
+      }
+      s += '<polyline class="trace" points="' + pts.join(' ') + '"/>';
+    }
+
+    // points + labels
+    var n = rows.length;
+    var step = n <= 12 ? 1 : Math.ceil(n / 12);
+    for (i = 0; i < n; i++) {
+      var r = rows[i];
+      var isM = Number.isFinite(r.mean);
+      var cx = x(i), cy = isM ? y(r.mean) : y0;
+      var show = (i % step === 0) || (i === n - 1);
+      if (isM) {
+        s += '<rect class="pt" x="' + (cx - 3) + '" y="' + (cy - 3) + '" width="6" height="6"/>';
+        if (n <= 14 || show) {
+          s += '<text class="val" x="' + cx + '" y="' + (cy - 8) + '" text-anchor="middle">' +
+               r.mean.toFixed(2) + '</text>';
+        }
+      } else {
+        s += '<rect class="pt pt-pending" x="' + (cx - 3) + '" y="' + (cy - 3) + '" width="6" height="6"/>';
+      }
+      if (show) {
+        s += '<text class="xlab" x="' + cx + '" y="' + (h - 13) +
+             '" text-anchor="end" transform="rotate(-30 ' + cx + ' ' + (h - 13) + ')">' +
+             esc(shortName(r.variant)) + '</text>';
+      }
+    }
+
+    // axis titles
+    s += '<text class="atitle" x="' + (pad.l + pw / 2) + '" y="' + (h - 2) +
+         '" text-anchor="middle">variant \u00b7 chronological</text>';
+    s += '<text class="atitle" x="12" y="' + (pad.t + ph / 2) + '" text-anchor="middle" ' +
+         'transform="rotate(-90 12 ' + (pad.t + ph / 2) + ')">mean_improvement_percent (%)</text>';
+
+    // legend
+    s += '<rect class="pt" x="' + pad.l + '" y="9" width="6" height="6"/>';
+    s += '<text class="axis" x="' + (pad.l + 11) + '" y="14">measured</text>';
+    s += '<rect class="pt pt-pending" x="' + (pad.l + 78) + '" y="9" width="6" height="6"/>';
+    s += '<text class="axis" x="' + (pad.l + 89) + '" y="14">awaiting benchmark</text>';
+
+    s += '</svg>';
+    host.innerHTML = s;
+  }
+
+  /* ---------- table + summary ---------- */
+
+  function renderTable() {
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + esc(r.variant) + '</td>' +
+        '<td>' + esc(shortCommit(r.commit)) + '</td>' +
+        '<td>' + esc(shortName(r.suite || '\u2014')) + '</td>' +
+        '<td class="num">' + fmtMean(r.mean) + '</td>' +
+        '<td class="num">' + fmtInt(r.cases) + '</td>' +
+        '<td class="num">' + fmtTime(r.runtime) + '</td>' +
+        '<td><span class="st st-' + statusClass(r.status) + '">' + esc(fmtStatus(r.status)) + '</span></td>' +
+        '<td class="dim">' + esc(r.ts) + '</td>';
+      frag.appendChild(tr);
+    }
+    els.tbody.replaceChildren(frag);
+    els.counter.textContent = rows.length + ' entries';
+  }
+
+  function renderSr() {
+    var parts = rows.map(function (r) {
+      return Number.isFinite(r.mean)
+        ? r.variant + ' ' + r.mean.toFixed(2) + ' percent'
+        : r.variant + ' no measurement, ' + (r.status || 'unknown');
+    });
+    els.chartSr.textContent = 'Variant mean improvement over baseline, percent, chronological. ' +
+      parts.join('; ') + '.';
+  }
+
+  function render() { renderChart(); renderTable(); renderSr(); }
+
+  /* ---------- load ---------- */
+
+  function load() {
+    fetch('results.jsonl', { cache: 'no-store' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.text();
+      })
+      .then(function (text) {
+        var lines = text.split(/\r?\n/).map(function (s) { return s.trim(); })
+                          .filter(function (s) { return s.length > 0; });
+        var bad = 0, skipped = 0;
+        rows = [];
+        for (var i = 0; i < lines.length; i++) {
+          try {
+            rows.push(normalize(JSON.parse(lines[i])));
+          } catch (e) { bad++; }
+        }
+        if (!rows.length) throw new Error('no valid JSONL rows in results.jsonl');
+        var activeSuite = '';
+        for (var j = 0; j < rows.length; j++) {
+          if (rows[j].suite) { activeSuite = rows[j].suite; break; }
+        }
+        if (activeSuite) {
+          var comparable = rows.filter(function (r) { return r.suite === activeSuite; });
+          skipped = rows.length - comparable.length;
+          rows = comparable;
+        }
+        var lastTs = rows[rows.length - 1].ts;
+        setStatus('ok', 'loaded ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') +
+          (activeSuite ? ' \u00b7 suite: ' + activeSuite : '') +
+          ' \u00b7 last: ' + (lastTs || '\u2014') +
+          (skipped ? ' \u00b7 ' + skipped + ' different-suite row' + (skipped === 1 ? '' : 's') + ' hidden' : '') +
+          (bad ? ' \u00b7 ' + bad + ' unreadable line' + (bad === 1 ? '' : 's') : ''));
+        render();
+      })
+      .catch(function (err) {
+        setStatus('err', 'error loading results.jsonl \u2014 ' + err.message +
+          ' \u00b7 serve this directory with `python -m http.server`');
+        rows = [];
+        render();
+      });
+  }
+
+  /* ---------- resize ---------- */
+
+  var scheduleTimer = null;
+  function schedule() {
+    if (scheduleTimer) clearTimeout(scheduleTimer);
+    scheduleTimer = setTimeout(renderChart, 120);
+  }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    rto = new ResizeObserver(schedule);
+    rto.observe(els.chart);
+  } else {
+    window.addEventListener('resize', schedule);
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
