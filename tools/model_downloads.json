@@ -1,0 +1,119 @@
+{
+  "allow_patterns": [
+    "*.json",
+    "*.model",
+    "*.py",
+    "*.safetensors",
+    "*.tiktoken",
+    "*.txt",
+    "README.md"
+  ],
+  "models": {
+    "qwen3-0.6b": {
+      "repo_id": "Qwen/Qwen3-0.6B",
+      "revision": "main",
+      "approx_gb": 1.50,
+      "purpose": "Small Chinese baseline and first capture target"
+    },
+    "deepseek-r1-qwen-1.5b": {
+      "repo_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "revision": "main",
+      "approx_gb": 3.55,
+      "purpose": "DeepSeek-trained Qwen model with 12:2 GQA"
+    },
+    "qwen3.5-2b": {
+      "repo_id": "Qwen/Qwen3.5-2B",
+      "revision": "main",
+      "approx_gb": 4.55,
+      "purpose": "Current Qwen family with head dimension 256"
+    },
+    "smollm2-1.7b": {
+      "repo_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "revision": "main",
+      "approx_gb": 3.42,
+      "purpose": "Non-Chinese MHA architecture"
+    },
+    "qwen3-8b": {
+      "repo_id": "Qwen/Qwen3-8B",
+      "revision": "main",
+      "approx_gb": 16.38,
+      "purpose": "Medium-scale Chinese activation-outlier coverage"
+    },
+    "qwen3.5-9b": {
+      "repo_id": "Qwen/Qwen3.5-9B",
+      "revision": "main",
+      "approx_gb": 19.31,
+      "purpose": "Head-dimension-256 coverage at larger scale"
+    },
+    "qwen3-14b": {
+      "repo_id": "Qwen/Qwen3-14B",
+      "revision": "main",
+      "approx_gb": 29.54,
+      "purpose": "Large dense model for high-memory capture"
+    },
+    "qwen3-32b": {
+      "repo_id": "Qwen/Qwen3-32B",
+      "revision": "main",
+      "approx_gb": 65.52,
+      "purpose": "Dense 32B Chinese model with standard 64:8 GQA"
+    },
+    "qwen3-30b-a3b": {
+      "repo_id": "Qwen/Qwen3-30B-A3B",
+      "revision": "main",
+      "approx_gb": 61.07,
+      "purpose": "Chinese MoE model with standard 32:4 GQA and expert Linears"
+    },
+    "qwen2.5-72b-instruct": {
+      "repo_id": "Qwen/Qwen2.5-72B-Instruct",
+      "revision": "main",
+      "approx_gb": 145.41,
+      "purpose": "Production-scale dense Chinese model with standard 64:8 GQA"
+    },
+    "olmo2-32b-instruct": {
+      "repo_id": "allenai/OLMo-2-0325-32B-Instruct",
+      "revision": "main",
+      "approx_gb": 64.47,
+      "purpose": "Non-Chinese dense architecture with standard 40:8 GQA"
+    },
+    "qwen3-0.6b-nvfp4": {
+      "repo_id": "NVFP4/Qwen3-0.6B-FP4",
+      "revision": "main",
+      "approx_gb": 0.56,
+      "purpose": "Community ModelOpt-format NVFP4 weight checkpoint"
+    },
+    "nemotron-embed-1b-nvfp4": {
+      "repo_id": "nvidia/Nemotron-3-Embed-1B-NVFP4",
+      "revision": "main",
+      "approx_gb": 1.03,
+      "purpose": "Small NVIDIA NVFP4 weight checkpoint"
+    }
+  },
+  "profiles": {
+    "laptop": [
+      "qwen3-0.6b",
+      "deepseek-r1-qwen-1.5b",
+      "qwen3.5-2b",
+      "smollm2-1.7b"
+    ],
+    "work": [
+      "qwen3-0.6b",
+      "deepseek-r1-qwen-1.5b",
+      "qwen3.5-2b",
+      "smollm2-1.7b",
+      "qwen3-8b",
+      "qwen3.5-9b",
+      "qwen3-14b",
+      "qwen2.5-72b-instruct"
+    ],
+    "work-large": [
+      "qwen3-32b",
+      "qwen3-30b-a3b",
+      "qwen2.5-72b-instruct",
+      "olmo2-32b-instruct"
+    ],
+    "genuine": [
+      "qwen3-0.6b-nvfp4",
+      "nemotron-embed-1b-nvfp4"
+    ]
+  }
+}

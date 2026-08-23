@@ -48,3 +48,45 @@ The exporter writes a deterministic archive containing only root-level
 Contract details and evaluator assumptions are in `docs/problem-contract.md`.
 Proved optimization facts and experiment priorities are in
 `docs/research-notes.md`.
+
+## Model downloads
+
+The real-model data pipeline keeps model snapshots and partial downloads under
+ignored `data/`. Set up its isolated dependency once:
+
+```bash
+python3 -m venv .venv-data
+.venv-data/bin/pip install -r requirements-data.txt
+```
+
+Inspect the model profiles, then start the laptop-sized profile in the
+background:
+
+```bash
+.venv-data/bin/python tools/download_models.py --list
+mkdir -p data
+nohup .venv-data/bin/python -u tools/download_models.py --profile laptop \
+  > data/download-models.log 2>&1 &
+```
+
+The Hugging Face cache retains completed blobs and interrupted partial files.
+Internet failures are retried with exponential backoff. After process
+termination or reboot, rerun the same command to resume. Current status is
+available without network access:
+
+```bash
+.venv-data/bin/python tools/download_models.py --status
+```
+
+On the high-memory work machine, `--profile work` selects the small and medium
+models plus a dense Qwen 72B model, approximately 223.66 GB in total. Add
+`--profile work-large` for the optional 30B-72B breadth suite; combining both
+profiles selects approximately 414.72 GB after deduplication:
+
+```bash
+.venv-data/bin/python tools/download_models.py \
+  --profile work --profile work-large --dry-run
+```
+
+To put model data on a different disk, pass both `--cache-dir` and
+`--state-file`; reuse the same paths when resuming.

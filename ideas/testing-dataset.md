@@ -23,7 +23,8 @@ Build contest-shaped groups from open transformer models:
 
 1. Load open model weights.
 2. Run representative text and capture inputs to selected Linear layers.
-3. Capture Q, K, and V before Attention where feasible.
+3. Capture Q and K after model-specific normalization and RoPE, and capture V
+   at the corresponding input to scaled dot-product Attention.
 4. Split sequences into five calibration and five test samples per group.
 5. Convert tensors to the contest's decoded NVFP4 carrier-plus-scale API format.
 6. Evaluate tagged solutions with exactly the same reference and case accounting
@@ -67,7 +68,9 @@ to reproduce the organizer's pipeline.
 - Different model libraries expose Q/K/V at different points, and fused Attention
   may require hooks or a small instrumentation patch.
 - The official Attention operation and compute precision remain unspecified.
-- Real-model data should supplement, not replace, synthetic edge cases.
+- Synthetic edge cases are optional diagnostics, not part of the primary model
+  ranking. A synthetic-only regression does not reject a candidate unless it
+  exposes a general numerical or legality failure relevant to real tensors.
 
 ## Suggested staged scope
 
@@ -85,3 +88,18 @@ disk, RAM, and runtime before selecting model checkpoints.
 - Reports show results by model, layer role, shape, and quantization source.
 - The dataset reveals whether conclusions based on synthetic families generalize
   to real transformer tensors.
+
+## Evaluation policy
+
+Use all generated real-model groups while selecting ideas; do not reserve a
+hidden holdout partition. The search is primarily over qualitatively different
+algorithms, and the value of more visible model coverage currently outweighs a
+small, noisy holdout. Repeated idea selection can still adapt to observed cases,
+so report disaggregated results and model-to-model consistency rather than
+trusting only one aggregate score.
+
+Store benchmark records in long form with dimensions for scenario, model, layer
+role, quantization recipe, sequence length, attention geometry, and weight
+provenance. The dashboard should support filters and an expandable grouping tree
+whose group-by dimensions can be reordered, instead of trying to display every
+cross-product as fixed columns.

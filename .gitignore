@@ -2,9 +2,13 @@ __pycache__/
 *.py[cod]
 *.swp
 *.swo
+/.venv-data/
 
 # Generated submission artifact; the separate submission repo tracks it.
 /solution.zip
 
 # Large extracted samples are retained locally and can be restored from the archive.
 /example/mini_sample/*.pt
+
+# Downloaded model snapshots, partial files, generated tensors, and run logs.
+/data/
