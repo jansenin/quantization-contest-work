@@ -3,489 +3,645 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Per-variant mean MSE improvement dashboard for the NVFP4-to-HiF4 quantization contest, preliminary round.">
-<title>Variant Benchmark Panel · NVFP4→HiF4</title>
+<meta name="description" content="Interactive evidence dashboard for the NVFP4-to-HiF4 quantization contest.">
+<link rel="icon" href="data:,">
+<title>Quantization Evidence Console</title>
 <style>
   :root {
-    --paper: #e9eef4;          /* cool light blue-gray paper */
-    --paper-2: #dfe7ee;        /* panel face */
-    --ink: #16283e;            /* dark navy text */
-    --ink-soft: #47607a;
-    --hair: #c2cfdc;           /* hairline */
-    --hair-strong: #92a6ba;
-    --trace: #e05a12;          /* orange trace */
-    --ok: #1f6f4a;
-    --warn: #9a6700;
-    --bad: #a1251b;
+    --paper: #eaf0ec;
+    --paper-deep: #dce6e0;
+    --panel: #f7faf7;
+    --ink: #17271f;
+    --ink-soft: #52675d;
+    --hair: #bccbc3;
+    --hair-strong: #81998c;
+    --signal: #d75b2b;
+    --signal-soft: #f2c5b3;
+    --blue: #275f8b;
+    --blue-soft: #bed3e3;
+    --good: #24705b;
+    --warn: #956b16;
+    --bad: #a13d38;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas,
             "Liberation Mono", "DejaVu Sans Mono", monospace;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Arial Narrow", "Aptos Narrow", "Roboto Condensed", var(--sans);
   }
 
   * { box-sizing: border-box; }
-
   html { color-scheme: light; }
-
   body {
     margin: 0;
-    background:
-      linear-gradient(rgba(22, 40, 62, 0.028) 1px, transparent 1px) 0 0 / 100% 26px,
-      var(--paper);
     color: var(--ink);
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
+    background:
+      linear-gradient(90deg, rgba(23, 39, 31, 0.025) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(rgba(23, 39, 31, 0.025) 1px, transparent 1px) 0 0 / 24px 24px,
+      var(--paper);
+    font: 14px/1.5 var(--sans);
     -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
   }
+  button, select, input { font: inherit; }
+  button, select { color: inherit; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-  :focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
-
-  .frame { max-width: 1000px; margin: 0 auto; padding: 30px 20px 64px; }
-
-  /* ---- faceplate ---- */
-  .plate { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 6px; }
-  .plate-top {
-    display: flex; justify-content: space-between; align-items: baseline;
-    gap: 12px; flex-wrap: wrap;
-    border-bottom: 1px solid var(--hair); padding-bottom: 7px; margin-bottom: 14px;
-    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
-    text-transform: uppercase; color: var(--ink-soft);
+  .shell { max-width: 1480px; margin: 0 auto; padding: 24px 22px 64px; }
+  .masthead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 20px;
+    align-items: end;
+    padding: 0 0 18px;
+    border-bottom: 3px double var(--ink);
   }
-  h1 { font-size: 24px; line-height: 1.15; margin: 0 0 6px; font-weight: 600; letter-spacing: 0.01em; }
-  .lede { margin: 0; color: var(--ink-soft); max-width: 64ch; }
-
-  .dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; vertical-align: 1px; background: var(--warn); }
-  .dot.ok  { background: var(--ok); }
-  .dot.warn{ background: var(--warn); }
-  .dot.err { background: var(--bad); }
-  #status { white-space: normal; }
-
-  /* ---- sections ---- */
-  section { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--hair); }
-  h2 {
-    display: flex; align-items: center; gap: 9px;
-    margin: 0 0 12px;
-    font-family: var(--mono); font-size: 11px; font-weight: 600;
-    letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-soft);
+  .eyebrow, .status, .section-label, .control-label, th, .metric-label {
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
   }
-  h2::before { content: ""; width: 7px; height: 7px; background: var(--trace); }
-  .count { margin-left: auto; color: var(--hair-strong); letter-spacing: 0.08em; }
-
-  /* ---- plot ---- */
-  #chart { width: 100%; }
-  #chart:empty { display: none; }
-  .plot { display: block; background: var(--paper-2); border: 1px solid var(--hair-strong); }
-  .plot .grid   { stroke: #c8d3de; stroke-width: 1; }
-  .plot .grid.base { stroke: #8ea3b8; stroke-dasharray: 4 3; }
-  .plot .trace  { fill: none; stroke: var(--trace); stroke-width: 1.8; stroke-linejoin: round; }
-  .plot .pt     { fill: var(--trace); }
-  .plot .pt-pending { fill: none; stroke: #8ea3b8; }
-  .plot .axis   { font-family: var(--mono); font-size: 10px; fill: var(--ink-soft); }
-  .plot .val    { font-family: var(--mono); font-size: 10px; fill: var(--ink); }
-  .plot .xlab   { font-family: var(--mono); font-size: 10px; fill: var(--ink-soft); }
-  .plot .atitle { font-family: var(--mono); font-size: 10px; letter-spacing: 0.09em; fill: var(--ink-soft); text-transform: uppercase; }
-
-  /* ---- metric ---- */
-  .formula {
-    font-family: var(--mono); font-size: 13px;
-    background: var(--paper-2); border: 1px solid var(--hair);
-    padding: 10px 12px; overflow-x: auto; margin: 0 0 10px;
+  .eyebrow { margin: 0 0 9px; color: var(--ink-soft); font-size: 10px; }
+  h1 {
+    margin: 0;
+    font: 700 clamp(30px, 4.8vw, 68px)/0.88 var(--display);
+    letter-spacing: -0.045em;
+    text-transform: uppercase;
+    max-width: 900px;
   }
-  .formula sub { font-size: 0.75em; }
-  ul.terms { margin: 0 0 0 2px; padding-left: 18px; color: var(--ink); }
-  ul.terms li { margin: 3px 0; }
-  ul.terms code { font-family: var(--mono); font-size: 12px; background: transparent; }
-
-  /* ---- raw table ---- */
-  .tbl-wrap { overflow-x: auto; border: 1px solid var(--hair-strong); background: var(--paper-2); }
-  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; min-width: 680px; }
-  th {
-    text-align: left; padding: 7px 10px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-soft); border-bottom: 1px solid var(--hair-strong);
-  }
-  td { padding: 6px 10px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
-  tbody tr:last-child td { border-bottom: 0; }
-  tbody tr:hover { background: rgba(224, 90, 18, 0.05); }
-  th.num, td.num { text-align: right; }
-  td.dim { color: var(--ink-soft); font-size: 11px; }
-
-  .st {
-    padding: 1px 6px; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  h1 span { color: var(--signal); }
+  .lede { max-width: 75ch; margin: 14px 0 0; color: var(--ink-soft); }
+  .status {
+    max-width: 360px;
+    padding: 10px 12px;
     border: 1px solid var(--hair-strong);
+    background: rgba(247, 250, 247, 0.72);
+    font-size: 10px;
   }
-  .st-ok   { color: var(--ok);   border-color: rgba(31, 111, 74, 0.45);  background: rgba(31, 111, 74, 0.06); }
-  .st-warn { color: var(--warn); border-color: rgba(154, 103, 0, 0.45);  background: rgba(154, 103, 0, 0.07); }
-  .st-bad  { color: var(--bad);  border-color: rgba(161, 37, 27, 0.45);  background: rgba(161, 37, 27, 0.06); }
+  .status::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--warn); }
+  .status.ok::before { background: var(--good); }
+  .status.err::before { background: var(--bad); }
+
+  .metric-deck {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(150px, 1fr));
+    gap: 1px;
+    margin-top: 20px;
+    border: 1px solid var(--hair-strong);
+    background: var(--hair);
+  }
+  .metric { min-height: 108px; padding: 13px 14px; background: var(--panel); }
+  .metric-label { display: block; color: var(--ink-soft); font-size: 9px; }
+  .metric-value { display: block; margin-top: 8px; font: 700 26px/1 var(--mono); letter-spacing: -0.06em; }
+  .metric-note { display: block; margin-top: 8px; color: var(--ink-soft); font-size: 11px; }
+  .metric.signal .metric-value { color: var(--signal); }
+  .metric.bad .metric-value { color: var(--bad); }
+
+  section { margin-top: 24px; }
+  .section-head { display: flex; gap: 14px; align-items: baseline; margin-bottom: 10px; }
+  .section-label { margin: 0; font-size: 10px; color: var(--ink-soft); white-space: nowrap; }
+  .section-rule { height: 1px; flex: 1; background: var(--hair); }
+  .section-note { margin: 0; color: var(--ink-soft); font-size: 12px; }
+
+  .workbench { border: 1px solid var(--hair-strong); background: rgba(247, 250, 247, 0.8); }
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 10px;
+    padding: 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .control { min-width: 0; }
+  .control-label { display: block; margin-bottom: 4px; font-size: 9px; color: var(--ink-soft); }
+  select, input[type="search"] {
+    width: 100%; height: 34px; padding: 5px 8px;
+    border: 1px solid var(--hair-strong); border-radius: 0;
+    background: var(--panel);
+  }
+  .filter-actions { display: flex; gap: 7px; align-items: end; }
+  .btn {
+    min-height: 34px; padding: 6px 10px;
+    border: 1px solid var(--hair-strong); border-radius: 0;
+    background: var(--panel); cursor: pointer;
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+  }
+  .btn:hover { border-color: var(--signal); color: var(--signal); }
+  .btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+
+  .routing {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .routing-title { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .routing-title small { display: block; margin-top: 3px; color: var(--ink-soft); text-transform: none; letter-spacing: 0; }
+  .route-rail { display: flex; gap: 6px; overflow-x: auto; padding: 2px 1px 5px; }
+  .route-item { display: flex; flex: 0 0 auto; border: 1px solid var(--hair-strong); background: var(--paper-deep); }
+  .route-item.dragging { opacity: 0.45; }
+  .route-toggle, .route-move {
+    border: 0; border-radius: 0; background: transparent; cursor: pointer;
+    font-family: var(--mono); font-size: 10px;
+  }
+  .route-toggle { min-width: 92px; padding: 7px 9px; text-align: left; }
+  .route-toggle::before { content: "○"; margin-right: 7px; color: var(--ink-soft); }
+  .route-item.active { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .route-item.active .route-toggle::before { content: "●"; color: var(--signal-soft); }
+  .route-move { width: 25px; border-left: 1px solid currentColor; opacity: 0.62; }
+  .route-move:hover { color: var(--signal); opacity: 1; }
+
+  .explorer-tools {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--hair);
+  }
+  .explorer-tools .spacer { flex: 1; }
+  .tool-select { width: auto; min-width: 154px; height: 30px; font-family: var(--mono); font-size: 10px; }
+
+  .rank-chart { padding: 14px; border-bottom: 1px solid var(--hair); }
+  .rank-row { display: grid; grid-template-columns: 150px minmax(150px, 1fr) 92px; gap: 10px; align-items: center; margin: 7px 0; }
+  .rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+  .rank-track { position: relative; height: 12px; background: var(--paper-deep); }
+  .rank-track::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--hair-strong); }
+  .rank-bar { position: absolute; top: 2px; height: 8px; background: var(--blue); }
+  .rank-bar.neg { background: var(--bad); }
+  .rank-value { text-align: right; font-family: var(--mono); font-size: 11px; }
+
+  .table-wrap { overflow: auto; max-height: 680px; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  th {
+    position: sticky; top: 0; z-index: 2;
+    padding: 8px 9px; text-align: left; color: var(--ink-soft); background: var(--paper-deep);
+    border-bottom: 1px solid var(--hair-strong); font-size: 9px; font-weight: 600;
+  }
+  th.num, td.num { text-align: right; }
+  td { padding: 6px 9px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
+  tbody tr:hover td { background: rgba(215, 91, 43, 0.055); }
+  .tree-label { display: flex; align-items: center; min-width: 270px; }
+  .tree-toggle { width: 22px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; font-family: var(--mono); }
+  .tree-toggle.blank { cursor: default; color: var(--hair-strong); }
+  .tree-dim { margin-right: 7px; color: var(--ink-soft); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .tree-value { font-weight: 650; }
+  .neg-value { color: var(--bad); }
+  .positive { color: var(--good); }
+  .muted { color: var(--ink-soft); }
+  .tree-message { padding: 10px 14px; border-top: 1px solid var(--hair); color: var(--ink-soft); font-family: var(--mono); font-size: 10px; }
+
+  .comparison-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr); gap: 14px; }
+  .panel { border: 1px solid var(--hair-strong); background: var(--panel); overflow: hidden; }
+  .panel-title { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--hair); font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: 0.1em; }
+  .score-cell { min-width: 135px; }
+  .score-track { position: relative; display: inline-block; width: 72px; height: 7px; margin-left: 7px; background: var(--paper-deep); vertical-align: 1px; }
+  .score-fill { display: block; height: 100%; background: var(--signal); }
+  .formula-box { padding: 14px; }
+  .formula {
+    margin: 0 0 12px; padding: 10px; overflow-x: auto;
+    border-left: 3px solid var(--signal); background: var(--paper-deep);
+    font-family: var(--mono); font-size: 12px;
+  }
+  .formula-box p { margin: 8px 0; color: var(--ink-soft); font-size: 12px; }
+  .synthetic-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--hair); }
+  .synthetic-item { padding: 10px 12px; background: var(--panel); }
+  .synthetic-item strong { display: block; font-family: var(--mono); }
+  .synthetic-item span { color: var(--ink-soft); font-size: 11px; }
 
   footer {
-    margin-top: 30px; padding-top: 10px; border-top: 1px solid var(--hair);
-    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-soft);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--hair);
+    color: var(--ink-soft); font: 10px var(--mono);
   }
+  .empty { padding: 22px; color: var(--ink-soft); font-family: var(--mono); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-  .empty { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); border: 1px dashed var(--hair-strong); background: var(--paper-2); padding: 16px; }
-
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  @media (max-width: 980px) {
+    .metric-deck { grid-template-columns: repeat(3, 1fr); }
+    .filter-grid { grid-template-columns: repeat(2, 1fr); }
+    .comparison-grid { grid-template-columns: 1fr; }
   }
-
   @media (max-width: 640px) {
-    .frame { padding: 18px 12px 48px; }
-    h1 { font-size: 19px; }
-    .formula { font-size: 11.5px; }
+    .shell { padding: 14px 10px 42px; }
+    .masthead { grid-template-columns: 1fr; }
+    .status { max-width: none; }
+    .metric-deck { grid-template-columns: repeat(2, 1fr); }
+    .metric:last-child { grid-column: 1 / -1; }
+    .filter-grid { grid-template-columns: 1fr; }
+    .routing { grid-template-columns: 1fr; }
+    .rank-row { grid-template-columns: 98px minmax(100px, 1fr) 72px; }
+    .synthetic-list { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .rank-bar, .score-fill { transition: width 180ms ease, left 180ms ease; }
   }
 </style>
 </head>
 <body>
-<div class="frame">
-
-  <header class="plate">
-    <div class="plate-top">
-      <span>Huawei prelim · NVFP4 → HiF4 conversion</span>
-      <span role="status" aria-live="polite" id="statusbar">
-        <i class="dot warn" id="status-dot" aria-hidden="true"></i><span id="status">loading results.jsonl …</span>
-      </span>
+<div class="shell">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Huawei preliminary · NVFP4 → HiF4 · evidence routing console</p>
+      <h1>Quantization <span>Evidence</span> Console</h1>
+      <p class="lede">Filter case-level real-model evidence, route dimensions into any hierarchy, and compare local behavior with measured contest scores without conflating the two baselines.</p>
     </div>
-    <h1>Variant Benchmark Panel</h1>
-    <p class="lede">Per-variant mean MSE improvement over the standard HiF4 baseline, in submission order. Kunpeng 920B CPU · FP32 outputs vs the NVFP4 reference.</p>
+    <div class="status" id="status" role="status" aria-live="polite">Loading dashboard-data.json</div>
   </header>
 
   <main>
-    <section aria-labelledby="plot-h">
-      <h2 id="plot-h">Plot</h2>
-      <div id="chart" role="img" aria-label="Variant mean improvement over baseline, chronological." aria-describedby="chart-sr"></div>
-      <p class="sr-only" id="chart-sr"></p>
-    </section>
+    <div class="metric-deck" aria-label="Filtered summary">
+      <div class="metric"><span class="metric-label">Selected evidence</span><strong class="metric-value" id="metric-cases">—</strong><span class="metric-note" id="metric-scope">case records</span></div>
+      <div class="metric signal"><span class="metric-label">Local improvement</span><strong class="metric-value" id="metric-mean">—</strong><span class="metric-note">mean vs local v000</span></div>
+      <div class="metric"><span class="metric-label">Judge-scale proxy</span><strong class="metric-value" id="metric-proxy">—</strong><span class="metric-note">anchored 1,240 → 50,000</span></div>
+      <div class="metric"><span class="metric-label">Negative cases</span><strong class="metric-value" id="metric-neg">—</strong><span class="metric-note" id="metric-neg-note">tail count</span></div>
+      <div class="metric bad"><span class="metric-label">Worst case</span><strong class="metric-value" id="metric-worst">—</strong><span class="metric-note" id="metric-worst-note">minimum improvement</span></div>
+    </div>
 
-    <section aria-labelledby="metric-h">
-      <h2 id="metric-h">Metric</h2>
-      <p class="formula">
-        mean_improvement_percent = mean<sub>test cases</sub>&thinsp;[ 100 &times; (baseline_mse &minus; current_mse) / baseline_mse ]
-      </p>
-      <ul class="terms">
-        <li><code>baseline_mse</code> — MSE of the standard HiF4 baseline output vs the NVFP4 reference output, per test case</li>
-        <li><code>current_mse</code> — MSE of this variant's output vs the same reference, per test case</li>
-        <li>positive &rarr; better than baseline; 0 &rarr; parity; negative &rarr; regression. Baseline (v000) sits at 0 by definition.</li>
-      </ul>
-    </section>
-
-    <section aria-labelledby="raw-h">
-      <h2 id="raw-h">Raw results <span class="count" id="counter"></span></h2>
-      <div class="tbl-wrap">
-        <table>
-          <caption class="sr-only">Raw benchmark rows in chronological order.</caption>
-          <thead>
-            <tr>
-              <th scope="col">variant</th>
-              <th scope="col">commit</th>
-              <th scope="col">suite</th>
-              <th scope="col" class="num">mean %</th>
-              <th scope="col" class="num">cases</th>
-              <th scope="col" class="num">runtime</th>
-              <th scope="col">status</th>
-              <th scope="col">ts</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
+    <section aria-labelledby="explore-title">
+      <div class="section-head"><h2 class="section-label" id="explore-title">01 / Real-model explorer</h2><span class="section-rule"></span><p class="section-note">Every aggregate below is recomputed from the active case filter.</p></div>
+      <div class="workbench">
+        <div class="filter-grid" id="filters"></div>
+        <div class="routing">
+          <div class="routing-title">Grouping route<small>Toggle, drag, or nudge dimensions.</small></div>
+          <div class="route-rail" id="route-rail" aria-label="Ordered grouping dimensions"></div>
+        </div>
+        <div class="explorer-tools">
+          <button class="btn" id="expand-all" type="button">Expand visible</button>
+          <button class="btn" id="collapse-all" type="button">Collapse all</button>
+          <label class="control-label" for="metric-select">Display metric</label>
+          <select class="tool-select" id="metric-select"><option value="local">Local improvement %</option><option value="proxy">Judge-scale proxy</option></select>
+          <label class="control-label" for="sort-select">Sort groups</label>
+          <select class="tool-select" id="sort-select"><option value="value-desc">Metric high → low</option><option value="value-asc">Metric low → high</option><option value="name">Dimension value</option><option value="negative">Negative tail</option></select>
+          <span class="spacer"></span>
+          <button class="btn primary" id="reset" type="button">Reset view</button>
+        </div>
+        <div class="rank-chart" id="rank-chart" aria-label="Top-level group comparison"></div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Hierarchical aggregation of filtered real-model benchmark cases.</caption>
+            <thead><tr><th>Hierarchy</th><th class="num">Local mean</th><th class="num">Judge proxy</th><th class="num">Official</th><th class="num">Cases</th><th class="num">Negative</th><th class="num">Minimum</th><th class="num">Maximum</th></tr></thead>
+            <tbody id="tree-body"></tbody>
+          </table>
+        </div>
+        <div class="tree-message" id="tree-message"></div>
       </div>
+    </section>
+
+    <section aria-labelledby="official-title">
+      <div class="section-head"><h2 class="section-label" id="official-title">02 / Official ↔ local calibration</h2><span class="section-rule"></span><p class="section-note">Model/mode/kind filters apply; the variant filter is intentionally ignored for comparison.</p></div>
+      <div class="comparison-grid">
+        <div class="panel">
+          <h3 class="panel-title">Measured score and filtered local proxy</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Variant</th><th class="num">Local mean</th><th class="num">Proxy</th><th class="num">Official score</th><th class="num">Proxy − official</th><th>Runtime</th></tr></thead>
+              <tbody id="official-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <aside class="panel formula-box">
+          <h3 class="panel-title" style="margin:-14px -14px 14px">Proxy definition</h3>
+          <p class="formula" id="proxy-formula">1,240 + (50,000 − 1,240) × local_mean / 100</p>
+          <p>The official score sums percentage-point improvements over 500 hidden cases. Its theoretical maximum is 50,000 under that convention.</p>
+          <p>The proxy anchors local v000 at its measured 1,240 score and maps a perfect local result to 50,000. It is useful for visual scale only.</p>
+          <p><strong>It is not an official prediction.</strong> Organizer STD errors and hidden-case composition are unavailable.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section aria-labelledby="synthetic-title">
+      <div class="section-head"><h2 class="section-label" id="synthetic-title">03 / Synthetic diagnostics</h2><span class="section-rule"></span><p class="section-note">Kept outside primary model ranking; useful for legality and broad numerical regressions.</p></div>
+      <div class="panel synthetic-list" id="synthetic-list"></div>
     </section>
   </main>
 
   <footer>
-    <span>source: progress/results.jsonl</span>
-    <span>metric: 100·(baseline_mse − current_mse)/baseline_mse, mean over cases</span>
+    <span id="source-note">source: progress/dashboard-data.json</span>
+    <span>regenerate: python3 tools/build_progress_data.py</span>
   </footer>
-
 </div>
 
-<noscript>
-  <p class="empty" style="max-width:1000px;margin:20px auto;">This panel needs JavaScript to fetch and plot results.jsonl. It is served with <code>python -m http.server</code>.</p>
-</noscript>
+<noscript><p class="empty">This console requires JavaScript. Serve the repository with <code>python3 -m http.server</code>.</p></noscript>
 
 <script>
 (function () {
   'use strict';
 
-  var els = {
-    status: document.getElementById('status'),
-    dot: document.getElementById('status-dot'),
-    chart: document.getElementById('chart'),
-    chartSr: document.getElementById('chart-sr'),
-    tbody: document.getElementById('tbody'),
-    counter: document.getElementById('counter')
+  var DIMENSIONS = [
+    { key: 'variant', label: 'Variant' },
+    { key: 'model', label: 'Model' },
+    { key: 'mode', label: 'Source mode' },
+    { key: 'kind', label: 'Scenario' },
+    { key: 'layer', label: 'Layer' },
+    { key: 'role', label: 'Role' },
+    { key: 'seq_len', label: 'Sequence' },
+    { key: 'case', label: 'Case' }
+  ];
+  var DEFAULT_GROUPS = ['variant', 'model', 'mode', 'kind'];
+  var MAX_TREE_ROWS = 2000;
+  var data = null;
+  var filtered = [];
+  var groupOrder = DIMENSIONS.map(function (d) { return d.key; });
+  var activeGroups = new Set(DEFAULT_GROUPS);
+  var expanded = new Set();
+  var filterState = {};
+  var draggedKey = null;
+
+  var el = {
+    status: document.getElementById('status'), filters: document.getElementById('filters'),
+    rail: document.getElementById('route-rail'), tree: document.getElementById('tree-body'),
+    message: document.getElementById('tree-message'), chart: document.getElementById('rank-chart'),
+    official: document.getElementById('official-body'), synthetic: document.getElementById('synthetic-list'),
+    metricSelect: document.getElementById('metric-select'), sortSelect: document.getElementById('sort-select'),
+    metricCases: document.getElementById('metric-cases'), metricScope: document.getElementById('metric-scope'),
+    metricMean: document.getElementById('metric-mean'), metricProxy: document.getElementById('metric-proxy'),
+    metricNeg: document.getElementById('metric-neg'), metricNegNote: document.getElementById('metric-neg-note'),
+    metricWorst: document.getElementById('metric-worst'), metricWorstNote: document.getElementById('metric-worst-note'),
+    sourceNote: document.getElementById('source-note')
   };
 
-  var DONE_RE = /^(ok|done|passed|complete|success|finished)$/i;
-  var rows = [];
-  var rto = null;
-
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-
-  function num(v) {
-    if (v === null || v === undefined || v === '') return NaN;
-    var n = typeof v === 'number' ? v : Number(String(v).trim());
-    return Number.isFinite(n) ? n : NaN;
+  function finite(value) { return typeof value === 'number' && Number.isFinite(value); }
+  function fmt(value, digits) { return finite(value) ? value.toFixed(digits === undefined ? 2 : digits) : '—'; }
+  function fmtInt(value) { return finite(value) ? Math.round(value).toLocaleString('en-US') : '—'; }
+  function variantNumber(value) { var m = String(value).match(/v(\d+)/); return m ? Number(m[1]) : 9999; }
+  function dimLabel(key) { var found = DIMENSIONS.find(function (d) { return d.key === key; }); return found ? found.label : key; }
+  function displayValue(key, value) {
+    if (key === 'kind') return value === 'attention' ? 'Attention' : 'Linear';
+    if (key === 'seq_len') return 'L=' + value;
+    if (key === 'case') return 'case ' + value;
+    if (key === 'layer') return 'layer ' + value;
+    return String(value);
   }
-
-  function normalize(o) {
+  function proxy(mean) {
+    if (!finite(mean) || !data) return NaN;
+    var p = data.judge_scale_proxy;
+    return p.baseline_official_score + (p.maximum_official_score - p.baseline_official_score) * mean / 100;
+  }
+  function officialForRows(rows) {
+    var variants = new Set(rows.map(function (r) { return r.variant; }));
+    if (variants.size !== 1) return NaN;
+    var variant = variants.values().next().value;
+    var row = data.official.find(function (o) { return o.variant === variant; });
+    return row ? row.score : NaN;
+  }
+  function aggregate(rows) {
+    var values = rows.filter(function (r) { return r.valid && finite(r.improvement_percent); })
+      .map(function (r) { return r.improvement_percent; });
+    var sum = values.reduce(function (a, b) { return a + b; }, 0);
+    var mean = values.length ? sum / values.length : NaN;
     return {
-      variant: (o.variant !== undefined && o.variant !== null) ? String(o.variant) : '\u2014',
-      commit:  (o.commit  !== undefined && o.commit  !== null) ? String(o.commit)  : '\u2014',
-      suite:   (o.suite   !== undefined && o.suite   !== null) ? String(o.suite)   : '',
-      mean:    num(o.mean_improvement_percent !== undefined ? o.mean_improvement_percent : o.mean),
-      cases:   num(o.case_count !== undefined ? o.case_count : o.cases),
-      runtime: num(o.runtime !== undefined ? o.runtime : o.time_seconds),
-      status:  (o.status !== undefined && o.status !== null) ? String(o.status) : '',
-      ts:      (o.ts !== undefined ? String(o.ts)
-               : o.timestamp !== undefined ? String(o.timestamp) : '')
+      count: rows.length, valid: values.length, invalid: rows.length - values.length,
+      mean: mean, proxy: proxy(mean), official: officialForRows(rows),
+      negative: values.filter(function (v) { return v < 0; }).length,
+      min: values.length ? Math.min.apply(null, values) : NaN,
+      max: values.length ? Math.max.apply(null, values) : NaN
     };
   }
 
-  function setStatus(cls, msg) {
-    els.dot.className = 'dot ' + cls;
-    els.status.textContent = msg;
-  }
-
-  /* ---------- chart ---------- */
-
-  function niceTicks(min, max, n) {
-    var span = max - min;
-    if (!Number.isFinite(span) || span <= 0) return [{ v: 0, label: '0' }];
-    var mag = Math.pow(10, Math.floor(Math.log10(span / n)));
-    var norm = (span / n) / mag;
-    var step = norm >= 5 ? 5 : norm >= 2.5 ? 2.5 : norm >= 2 ? 2 : 1;
-    step *= mag;
-    var dec = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
-    var lo = Math.floor(min / step) * step;
-    var hi = Math.ceil(max / step) * step;
-    var out = [];
-    for (var v = lo; v <= hi + step * 1e-6; v += step) {
-      out.push({ v: v, label: String(parseFloat(v.toFixed(dec))) });
-    }
-    return out;
-  }
-
-  function shortName(v) { return v.length > 10 ? v.slice(0, 9) + '\u2026' : v; }
-  function shortCommit(c) { return c.length > 9 ? c.slice(0, 7) : c; }
-  function fmtMean(v)  { return Number.isFinite(v) ? v.toFixed(2) + ' %' : '\u2014'; }
-  function fmtInt(v)   { return Number.isFinite(v) ? String(Math.round(v)) : '\u2014'; }
-  function fmtTime(s) {
-    if (!Number.isFinite(s)) return '\u2014';
-    if (s >= 60) {
-      var m = Math.floor(s / 60), rem = s - m * 60;
-      return m + 'm ' + (rem < 10 ? '0' : '') + rem.toFixed(1) + 's';
-    }
-    return s.toFixed(1) + ' s';
-  }
-  function fmtStatus(s) { return s ? String(s).toLowerCase().replace(/[_-]+/g, ' ') : '\u2014'; }
-  function statusClass(s) {
-    if (!s) return '';
-    if (DONE_RE.test(s)) return 'ok';
-    if (/await|pending|queued|running/i.test(s)) return 'warn';
-    if (/fail|error|invalid|crash|timeout/i.test(s)) return 'bad';
-    return '';
-  }
-
-  function renderChart() {
-    var host = els.chart;
-    var w = host.clientWidth;
-    if (w < 120) return;
-    var h = Math.round(Math.min(430, Math.max(230, w * 0.5)));
-    host.style.height = h + 'px';
-
-    var pad = { l: 48, r: 16, t: 24, b: 42 };
-    var pw = w - pad.l - pad.r;
-    var ph = h - pad.t - pad.b;
-
-    if (!rows.length) {
-      host.innerHTML = '<p class="empty">No data \u2014 add rows to results.jsonl and reload.</p>';
-      return;
-    }
-
-    var measured = [], pending = [], i;
-    for (i = 0; i < rows.length; i++) {
-      (Number.isFinite(rows[i].mean) ? measured : pending).push(i);
-    }
-
-    var lo = 0, hi = 0;
-    for (i = 0; i < measured.length; i++) {
-      var m = rows[measured[i]].mean;
-      lo = Math.min(lo, m); hi = Math.max(hi, m);
-    }
-    if (hi - lo < 1e-9) { lo = -1; hi = 1; }
-    var padY = (hi - lo) * 0.14;
-    lo -= padY; hi += padY;
-
-    var ticks = niceTicks(lo, hi, 5);
-    var y = function (v) { return pad.t + ph * (1 - (v - lo) / (hi - lo)); };
-    var x = function (idx) {
-      return pad.l + (rows.length === 1 ? pw / 2 : pw * idx / (rows.length - 1));
-    };
-    var y0 = y(0);
-
-    var s = '';
-    s += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h +
-         '" viewBox="0 0 ' + w + ' ' + h + '" class="plot" role="presentation">';
-
-    // grid + y labels
-    for (i = 0; i < ticks.length; i++) {
-      var yv = y(ticks[i].v);
-      s += '<line class="grid" x1="' + pad.l + '" y1="' + yv + '" x2="' + (w - pad.r) + '" y2="' + yv + '"/>';
-      s += '<text class="axis" x="' + (pad.l - 8) + '" y="' + (yv + 3.5) + '" text-anchor="end">' +
-           esc(ticks[i].label) + '</text>';
-    }
-    s += '<line class="grid base" x1="' + pad.l + '" y1="' + y0 + '" x2="' + (w - pad.r) + '" y2="' + y0 + '"/>';
-
-    // trace through measured rows, chronological
-    if (measured.length > 1) {
-      var pts = [];
-      for (i = 0; i < measured.length; i++) {
-        var ix = measured[i];
-        pts.push(x(ix).toFixed(1) + ',' + y(rows[ix].mean).toFixed(1));
-      }
-      s += '<polyline class="trace" points="' + pts.join(' ') + '"/>';
-    }
-
-    // points + labels
-    var n = rows.length;
-    var step = n <= 12 ? 1 : Math.ceil(n / 12);
-    for (i = 0; i < n; i++) {
-      var r = rows[i];
-      var isM = Number.isFinite(r.mean);
-      var cx = x(i), cy = isM ? y(r.mean) : y0;
-      var show = (i % step === 0) || (i === n - 1);
-      if (isM) {
-        s += '<rect class="pt" x="' + (cx - 3) + '" y="' + (cy - 3) + '" width="6" height="6"/>';
-        if (n <= 14 || show) {
-          s += '<text class="val" x="' + cx + '" y="' + (cy - 8) + '" text-anchor="middle">' +
-               r.mean.toFixed(2) + '</text>';
-        }
-      } else {
-        s += '<rect class="pt pt-pending" x="' + (cx - 3) + '" y="' + (cy - 3) + '" width="6" height="6"/>';
-      }
-      if (show) {
-        s += '<text class="xlab" x="' + cx + '" y="' + (h - 13) +
-             '" text-anchor="end" transform="rotate(-30 ' + cx + ' ' + (h - 13) + ')">' +
-             esc(shortName(r.variant)) + '</text>';
-      }
-    }
-
-    // axis titles
-    s += '<text class="atitle" x="' + (pad.l + pw / 2) + '" y="' + (h - 2) +
-         '" text-anchor="middle">variant \u00b7 chronological</text>';
-    s += '<text class="atitle" x="12" y="' + (pad.t + ph / 2) + '" text-anchor="middle" ' +
-         'transform="rotate(-90 12 ' + (pad.t + ph / 2) + ')">mean_improvement_percent (%)</text>';
-
-    // legend
-    s += '<rect class="pt" x="' + pad.l + '" y="9" width="6" height="6"/>';
-    s += '<text class="axis" x="' + (pad.l + 11) + '" y="14">measured</text>';
-    s += '<rect class="pt pt-pending" x="' + (pad.l + 78) + '" y="9" width="6" height="6"/>';
-    s += '<text class="axis" x="' + (pad.l + 89) + '" y="14">awaiting benchmark</text>';
-
-    s += '</svg>';
-    host.innerHTML = s;
-  }
-
-  /* ---------- table + summary ---------- */
-
-  function renderTable() {
-    var frag = document.createDocumentFragment();
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td>' + esc(r.variant) + '</td>' +
-        '<td>' + esc(shortCommit(r.commit)) + '</td>' +
-        '<td>' + esc(shortName(r.suite || '\u2014')) + '</td>' +
-        '<td class="num">' + fmtMean(r.mean) + '</td>' +
-        '<td class="num">' + fmtInt(r.cases) + '</td>' +
-        '<td class="num">' + fmtTime(r.runtime) + '</td>' +
-        '<td><span class="st st-' + statusClass(r.status) + '">' + esc(fmtStatus(r.status)) + '</span></td>' +
-        '<td class="dim">' + esc(r.ts) + '</td>';
-      frag.appendChild(tr);
-    }
-    els.tbody.replaceChildren(frag);
-    els.counter.textContent = rows.length + ' entries';
-  }
-
-  function renderSr() {
-    var parts = rows.map(function (r) {
-      return Number.isFinite(r.mean)
-        ? r.variant + ' ' + r.mean.toFixed(2) + ' percent'
-        : r.variant + ' no measurement, ' + (r.status || 'unknown');
+  function uniqueValues(key) {
+    var values = Array.from(new Set(data.cases.map(function (r) { return String(r[key]); })));
+    values.sort(function (a, b) {
+      if (key === 'variant') return variantNumber(a) - variantNumber(b);
+      if (['layer', 'seq_len', 'case'].indexOf(key) >= 0) return Number(a) - Number(b);
+      return a.localeCompare(b);
     });
-    els.chartSr.textContent = 'Variant mean improvement over baseline, percent, chronological. ' +
-      parts.join('; ') + '.';
+    return values;
+  }
+  function buildFilters() {
+    el.filters.innerHTML = '';
+    DIMENSIONS.forEach(function (dim) {
+      var wrap = document.createElement('label');
+      wrap.className = 'control';
+      var options = '<option value="">All</option>' + uniqueValues(dim.key).map(function (value) {
+        return '<option value="' + esc(value) + '">' + esc(displayValue(dim.key, value)) + '</option>';
+      }).join('');
+      wrap.innerHTML = '<span class="control-label">' + esc(dim.label) + '</span><select data-filter="' + esc(dim.key) + '">' + options + '</select>';
+      el.filters.appendChild(wrap);
+    });
+    var search = document.createElement('label');
+    search.className = 'control';
+    search.innerHTML = '<span class="control-label">Search dimensions</span><input type="search" id="search" placeholder="model, role, variant…">';
+    el.filters.appendChild(search);
+    var validity = document.createElement('label');
+    validity.className = 'control';
+    validity.innerHTML = '<span class="control-label">Validity</span><select data-filter="valid"><option value="">All</option><option value="true">Valid</option><option value="false">Invalid</option></select>';
+    el.filters.appendChild(validity);
+    el.filters.addEventListener('input', function (event) {
+      var key = event.target.getAttribute('data-filter');
+      if (key) filterState[key] = event.target.value;
+      if (event.target.id === 'search') filterState.search = event.target.value.trim().toLowerCase();
+      refresh();
+    });
   }
 
-  function render() { renderChart(); renderTable(); renderSr(); }
-
-  /* ---------- load ---------- */
-
-  function load() {
-    fetch('results.jsonl', { cache: 'no-store' })
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.text();
-      })
-      .then(function (text) {
-        var lines = text.split(/\r?\n/).map(function (s) { return s.trim(); })
-                          .filter(function (s) { return s.length > 0; });
-        var bad = 0, skipped = 0;
-        rows = [];
-        for (var i = 0; i < lines.length; i++) {
-          try {
-            rows.push(normalize(JSON.parse(lines[i])));
-          } catch (e) { bad++; }
-        }
-        if (!rows.length) throw new Error('no valid JSONL rows in results.jsonl');
-        var activeSuite = '';
-        for (var j = 0; j < rows.length; j++) {
-          if (rows[j].suite) { activeSuite = rows[j].suite; break; }
-        }
-        if (activeSuite) {
-          var comparable = rows.filter(function (r) { return r.suite === activeSuite; });
-          skipped = rows.length - comparable.length;
-          rows = comparable;
-        }
-        var lastTs = rows[rows.length - 1].ts;
-        setStatus('ok', 'loaded ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') +
-          (activeSuite ? ' \u00b7 suite: ' + activeSuite : '') +
-          ' \u00b7 last: ' + (lastTs || '\u2014') +
-          (skipped ? ' \u00b7 ' + skipped + ' different-suite row' + (skipped === 1 ? '' : 's') + ' hidden' : '') +
-          (bad ? ' \u00b7 ' + bad + ' unreadable line' + (bad === 1 ? '' : 's') : ''));
-        render();
-      })
-      .catch(function (err) {
-        setStatus('err', 'error loading results.jsonl \u2014 ' + err.message +
-          ' \u00b7 serve this directory with `python -m http.server`');
-        rows = [];
-        render();
+  function renderRail() {
+    el.rail.innerHTML = '';
+    groupOrder.forEach(function (key, index) {
+      var item = document.createElement('div');
+      item.className = 'route-item' + (activeGroups.has(key) ? ' active' : '');
+      item.draggable = true;
+      item.dataset.key = key;
+      item.innerHTML = '<button class="route-toggle" type="button" aria-pressed="' + activeGroups.has(key) + '">' + esc(dimLabel(key)) + '</button>' +
+        '<button class="route-move" type="button" data-move="-1" aria-label="Move ' + esc(dimLabel(key)) + ' left">‹</button>' +
+        '<button class="route-move" type="button" data-move="1" aria-label="Move ' + esc(dimLabel(key)) + ' right">›</button>';
+      item.querySelector('.route-toggle').addEventListener('click', function () {
+        if (activeGroups.has(key)) activeGroups.delete(key); else activeGroups.add(key);
+        expanded.clear(); renderRail(); renderExplorer();
       });
+      item.querySelectorAll('.route-move').forEach(function (button) {
+        button.addEventListener('click', function () { moveGroup(index, Number(button.dataset.move)); });
+      });
+      item.addEventListener('dragstart', function () { draggedKey = key; item.classList.add('dragging'); });
+      item.addEventListener('dragend', function () { draggedKey = null; item.classList.remove('dragging'); });
+      item.addEventListener('dragover', function (event) { event.preventDefault(); });
+      item.addEventListener('drop', function (event) {
+        event.preventDefault();
+        if (!draggedKey || draggedKey === key) return;
+        var from = groupOrder.indexOf(draggedKey), to = groupOrder.indexOf(key);
+        groupOrder.splice(from, 1); groupOrder.splice(to, 0, draggedKey);
+        expanded.clear(); renderRail(); renderExplorer();
+      });
+      el.rail.appendChild(item);
+    });
+  }
+  function moveGroup(index, delta) {
+    var target = index + delta;
+    if (target < 0 || target >= groupOrder.length) return;
+    var tmp = groupOrder[index]; groupOrder[index] = groupOrder[target]; groupOrder[target] = tmp;
+    expanded.clear(); renderRail(); renderExplorer();
   }
 
-  /* ---------- resize ---------- */
+  function applyFilters(ignoreKey) {
+    return data.cases.filter(function (row) {
+      for (var key in filterState) {
+        if (key === ignoreKey || key === 'search' || !filterState[key]) continue;
+        if (String(row[key]) !== filterState[key]) return false;
+      }
+      if (filterState.search) {
+        var haystack = [row.model, row.arch, row.variant, row.mode, row.kind, row.role, row.dataset].join(' ').toLowerCase();
+        if (haystack.indexOf(filterState.search) < 0) return false;
+      }
+      return true;
+    });
+  }
+  function activeDimensions() { return groupOrder.filter(function (key) { return activeGroups.has(key); }); }
 
-  var scheduleTimer = null;
-  function schedule() {
-    if (scheduleTimer) clearTimeout(scheduleTimer);
-    scheduleTimer = setTimeout(renderChart, 120);
+  function makeTree(rows, dims, depth, path) {
+    if (depth >= dims.length) return [];
+    var key = dims[depth], groups = new Map();
+    rows.forEach(function (row) {
+      var value = row[key];
+      var token = String(value);
+      if (!groups.has(token)) groups.set(token, { value: value, rows: [] });
+      groups.get(token).rows.push(row);
+    });
+    var nodes = Array.from(groups.values()).map(function (entry) {
+      var nodePath = path.concat([key + '=' + entry.value]);
+      return { dim: key, value: entry.value, rows: entry.rows, path: nodePath.join('|'), children: makeTree(entry.rows, dims, depth + 1, nodePath) };
+    });
+    return sortNodes(nodes);
+  }
+  function sortNodes(nodes) {
+    var mode = el.sortSelect.value;
+    return nodes.sort(function (a, b) {
+      if (mode === 'name') {
+        if (a.dim === 'variant') return variantNumber(a.value) - variantNumber(b.value);
+        return String(a.value).localeCompare(String(b.value), undefined, { numeric: true });
+      }
+      var aa = aggregate(a.rows), bb = aggregate(b.rows);
+      if (mode === 'negative') return bb.negative - aa.negative || aa.mean - bb.mean;
+      var av = el.metricSelect.value === 'proxy' ? aa.proxy : aa.mean;
+      var bv = el.metricSelect.value === 'proxy' ? bb.proxy : bb.mean;
+      return mode === 'value-asc' ? av - bv : bv - av;
+    });
   }
 
-  if (typeof ResizeObserver !== 'undefined') {
-    rto = new ResizeObserver(schedule);
-    rto.observe(els.chart);
-  } else {
-    window.addEventListener('resize', schedule);
+  function metricClass(value) { return finite(value) && value < 0 ? 'neg-value' : finite(value) && value > 0 ? 'positive' : ''; }
+  function nodeRow(node, depth) {
+    var a = aggregate(node.rows), hasChildren = node.children.length > 0, isOpen = expanded.has(node.path);
+    var tr = document.createElement('tr');
+    var toggle = hasChildren ? '<button type="button" class="tree-toggle" aria-label="' + (isOpen ? 'Collapse' : 'Expand') + '">' + (isOpen ? '−' : '+') + '</button>' : '<span class="tree-toggle blank">·</span>';
+    tr.innerHTML = '<td><div class="tree-label" style="padding-left:' + (depth * 18) + 'px">' + toggle + '<span class="tree-dim">' + esc(dimLabel(node.dim)) + '</span><span class="tree-value">' + esc(displayValue(node.dim, node.value)) + '</span></div></td>' +
+      '<td class="num ' + metricClass(a.mean) + '">' + fmt(a.mean, 4) + '%</td>' +
+      '<td class="num">' + fmtInt(a.proxy) + '</td>' +
+      '<td class="num">' + fmtInt(a.official) + '</td>' +
+      '<td class="num">' + fmtInt(a.count) + '</td>' +
+      '<td class="num ' + (a.negative ? 'neg-value' : '') + '">' + fmtInt(a.negative) + '</td>' +
+      '<td class="num ' + metricClass(a.min) + '">' + fmt(a.min, 2) + '%</td>' +
+      '<td class="num ' + metricClass(a.max) + '">' + fmt(a.max, 2) + '%</td>';
+    if (hasChildren) tr.querySelector('button').addEventListener('click', function () {
+      if (expanded.has(node.path)) expanded.delete(node.path); else expanded.add(node.path);
+      renderExplorer();
+    });
+    return tr;
+  }
+  function renderTreeNodes(nodes, depth, fragment, count) {
+    for (var i = 0; i < nodes.length && count.value < MAX_TREE_ROWS; i++) {
+      fragment.appendChild(nodeRow(nodes[i], depth)); count.value++;
+      if (expanded.has(nodes[i].path)) renderTreeNodes(nodes[i].children, depth + 1, fragment, count);
+    }
   }
 
-  load();
+  function renderRank(nodes) {
+    if (!nodes.length) { el.chart.innerHTML = '<div class="empty">No groups under the current filters.</div>'; return; }
+    var values = nodes.map(function (node) { var a = aggregate(node.rows); return el.metricSelect.value === 'proxy' ? a.proxy : a.mean; });
+    var min = Math.min.apply(null, values.concat([0])), max = Math.max.apply(null, values.concat([0]));
+    var span = max - min || 1, zero = (0 - min) / span * 100;
+    el.chart.innerHTML = nodes.slice(0, 18).map(function (node, i) {
+      var value = values[i], pos = (value - min) / span * 100;
+      var left = Math.min(zero, pos), width = Math.max(0.7, Math.abs(pos - zero));
+      var label = dimLabel(node.dim) + ' · ' + displayValue(node.dim, node.value);
+      var shown = el.metricSelect.value === 'proxy' ? fmtInt(value) : fmt(value, 3) + '%';
+      return '<div class="rank-row"><span class="rank-name" title="' + esc(label) + '">' + esc(label) + '</span><span class="rank-track"><i class="rank-bar ' + (value < 0 ? 'neg' : '') + '" style="left:' + left + '%;width:' + width + '%"></i></span><strong class="rank-value">' + shown + '</strong></div>';
+    }).join('');
+  }
+
+  function renderSummary() {
+    var a = aggregate(filtered);
+    el.metricCases.textContent = fmtInt(a.count);
+    el.metricScope.textContent = new Set(filtered.map(function (r) { return r.model; })).size + ' models · ' + new Set(filtered.map(function (r) { return r.variant; })).size + ' variants';
+    el.metricMean.textContent = fmt(a.mean, 3) + '%';
+    el.metricProxy.textContent = fmtInt(a.proxy);
+    el.metricNeg.textContent = fmtInt(a.negative);
+    el.metricNegNote.textContent = a.valid ? fmt(a.negative / a.valid * 100, 2) + '% of valid cases' : 'no valid cases';
+    el.metricWorst.textContent = fmt(a.min, 2) + '%';
+    if (finite(a.min)) {
+      var worst = filtered.filter(function (r) { return r.valid && r.improvement_percent === a.min; })[0];
+      el.metricWorstNote.textContent = worst ? [worst.model, worst.variant, worst.mode, 'L' + worst.layer, worst.role].join(' · ') : 'minimum improvement';
+    } else el.metricWorstNote.textContent = 'minimum improvement';
+  }
+
+  function renderExplorer() {
+    var dims = activeDimensions();
+    var tree = dims.length ? makeTree(filtered, dims, 0, []) : [];
+    renderRank(!filtered.length ? [] : tree.length ? tree : [{ dim: 'scope', value: 'all selected cases', rows: filtered, path: 'scope', children: [] }]);
+    var fragment = document.createDocumentFragment(), count = { value: 0 };
+    if (!filtered.length) {
+      var tr = document.createElement('tr'); tr.innerHTML = '<td colspan="8" class="empty">No case records match this filter.</td>'; fragment.appendChild(tr);
+    } else if (!dims.length) {
+      fragment.appendChild(nodeRow({ dim: 'scope', value: 'all selected cases', rows: filtered, path: 'scope', children: [] }, 0)); count.value = 1;
+    } else renderTreeNodes(tree, 0, fragment, count);
+    el.tree.replaceChildren(fragment);
+    el.message.textContent = dims.length ? count.value + ' hierarchy rows rendered · route: ' + dims.map(dimLabel).join(' → ') + (count.value >= MAX_TREE_ROWS ? ' · display capped at ' + MAX_TREE_ROWS : '') : 'No grouping dimensions active; showing one aggregate.';
+  }
+
+  function renderOfficial() {
+    var comparisonRows = applyFilters('variant');
+    el.official.innerHTML = data.official.map(function (official) {
+      var rows = comparisonRows.filter(function (r) { return r.variant === official.variant; });
+      var mean = official.variant === 'v000' ? 0 : aggregate(rows).mean;
+      var projected = proxy(mean), delta = projected - official.score;
+      var width = Math.max(0, Math.min(100, official.score / data.competition.theoretical_max_score * 100));
+      return '<tr><td title="' + esc(official.name) + '"><strong>' + esc(official.variant) + '</strong> <span class="muted">' + esc(official.spec.replace('solution/', '')) + '</span></td>' +
+        '<td class="num ' + metricClass(mean) + '">' + fmt(mean, 4) + '%</td>' +
+        '<td class="num">' + fmtInt(projected) + '</td>' +
+        '<td class="num score-cell"><strong>' + fmtInt(official.score) + '</strong><span class="score-track"><i class="score-fill" style="width:' + width + '%"></i></span></td>' +
+        '<td class="num ' + metricClass(delta) + '">' + (finite(delta) && delta > 0 ? '+' : '') + fmtInt(delta) + '</td>' +
+        '<td>' + official.runtimes_s.map(function (v) { return v + 's'; }).join(', ') + '</td></tr>';
+    }).join('');
+  }
+  function renderSynthetic() {
+    el.synthetic.innerHTML = data.synthetic.map(function (row) {
+      return '<div class="synthetic-item"><strong>' + esc(row.variant) + ' · ' + fmt(row.mean_improvement_percent, 3) + '%</strong><span>' + fmtInt(row.case_count) + ' cases · ' + esc(row.status || 'unknown') + '</span></div>';
+    }).join('');
+  }
+
+  function refresh() {
+    filtered = applyFilters();
+    renderSummary(); renderExplorer(); renderOfficial();
+  }
+  function reset() {
+    filterState = {};
+    el.filters.querySelectorAll('select').forEach(function (select) { select.value = ''; });
+    var search = document.getElementById('search'); if (search) search.value = '';
+    groupOrder = DIMENSIONS.map(function (d) { return d.key; }); activeGroups = new Set(DEFAULT_GROUPS); expanded.clear();
+    el.metricSelect.value = 'local'; el.sortSelect.value = 'value-desc';
+    renderRail(); refresh();
+  }
+  function collectPaths(nodes) {
+    nodes.forEach(function (node) { if (node.children.length) { expanded.add(node.path); collectPaths(node.children); } });
+  }
+
+  document.getElementById('reset').addEventListener('click', reset);
+  document.getElementById('collapse-all').addEventListener('click', function () { expanded.clear(); renderExplorer(); });
+  document.getElementById('expand-all').addEventListener('click', function () { collectPaths(makeTree(filtered, activeDimensions(), 0, [])); renderExplorer(); });
+  el.metricSelect.addEventListener('change', renderExplorer);
+  el.sortSelect.addEventListener('change', renderExplorer);
+
+  fetch('dashboard-data.json', { cache: 'no-store' })
+    .then(function (response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
+    .then(function (documentData) {
+      if (documentData.schema_version !== 1 || !Array.isArray(documentData.cases)) throw new Error('unsupported dashboard schema');
+      data = documentData;
+      el.status.className = 'status ok';
+      el.status.textContent = data.cases.length.toLocaleString('en-US') + ' case records · ' + data.models.length + ' models · generated ' + data.generated_at;
+      el.sourceNote.textContent = 'source: dashboard-data.json · ' + data.sources.records.selected.toLocaleString('en-US') + ' validated case rows';
+      buildFilters(); renderRail(); renderSynthetic(); reset();
+    })
+    .catch(function (error) {
+      el.status.className = 'status err'; el.status.textContent = 'Dashboard data error: ' + error.message;
+      document.querySelector('main').innerHTML = '<div class="empty">Could not load <code>dashboard-data.json</code>. Run <code>python3 tools/build_progress_data.py</code>, then serve the repository with <code>python3 -m http.server</code>.</div>';
+    });
 })();
 </script>
 </body>

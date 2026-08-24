@@ -27,12 +27,21 @@ python3 tools/fingerprint_nvfp4.py \
 ## Dashboard
 
 ```bash
+python3 tools/build_progress_data.py
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000/progress/`. The plotted metric is the arithmetic mean
-over cases of `100 * (baseline_mse - candidate_mse) / baseline_mse`; it is not the
-unavailable official score.
+Open `http://localhost:8000/progress/`. The dashboard streams ignored benchmark
+records into a tracked, compact `progress/dashboard-data.json` artifact. It
+supports case-level filters and reorderable, expandable grouping by variant,
+model, source mode, scenario, layer, role, sequence length, and case index.
+
+The local metric is the arithmetic mean over cases of
+`100 * (baseline_mse - candidate_mse) / baseline_mse`. The judge-scale proxy
+linearly anchors local v000 at its measured 1,240 official points and a perfect
+local result at the theoretical 50,000-point maximum. It is a display scale,
+not an official-score prediction: organizer STD errors and hidden cases are
+unavailable locally. Actual user-reported contest scores are shown separately.
 
 ## Variant workflow
 
