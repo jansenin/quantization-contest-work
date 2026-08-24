@@ -12,3 +12,4 @@ __pycache__/
 
 # Downloaded model snapshots, partial files, generated tensors, and run logs.
 /data/
+/benchmarks/realdata/

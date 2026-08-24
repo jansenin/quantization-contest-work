@@ -311,7 +311,8 @@ class DatasetIdTest(unittest.TestCase):
             seed=0,
         )
         first = build_dataset_id(canonical_capture_config(**kwargs))
-        self.assertEqual(first, build_dataset_id(canonical_capture_config(**kwargs)))
+        canonical = canonical_capture_config(**kwargs)
+        self.assertEqual(first, build_dataset_id(canonical))
         self.assertEqual(len(first), 16)
         sensitive = {
             "corpus_sha": "deadbeef",
@@ -739,6 +740,15 @@ class CaptureRunTest(unittest.TestCase):
         self.assertFalse(summary["reused"])
         self.assertEqual(len(loader2.load_calls), 1)
         self.assertEqual(self._load_manifest(summary["dataset_id"])["status"], "complete")
+
+    def test_resume_rejects_mixed_torch_versions(self) -> None:
+        first = run_capture(self._config(), loader=FakeLoader())
+        manifest_path = Path(first["output_dir"]) / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["runtime"]["torch_version"] = "different-torch"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        with self.assertRaisesRegex(ResumeMismatchError, "mixing runtime versions"):
+            run_capture(self._config(), loader=FakeLoader())
 
     def test_capture_count_assertion_failure_attention(self) -> None:
         model = FakeModel()

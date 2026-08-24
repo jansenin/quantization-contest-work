@@ -123,3 +123,28 @@ groups are written atomically under ignored
 `data/real-captures/<dataset_id>/`. Rerunning an identical command verifies
 completed shard hashes and resumes missing groups; use `--force` only to
 discard and rebuild that dataset.
+
+## Real-model evaluation
+
+Evaluate a capture one shard at a time against tagged solutions. The source
+NVFP4 data is derived from raw BF16 independently under ceiling, nearest, and
+seeded stochastic E4M3 scale selection:
+
+```bash
+python3 tools/evaluate_real.py \
+  --dataset 45ac5df1ecf7cca4 \
+  --baseline solution/v000-baseline \
+  --candidate solution/v008-gated-hadamard \
+  --threads 1
+```
+
+Use repeatable `--candidate`, `--modes`, and `--group-filter` arguments to
+restrict comparisons. For example, `--modes ceil --group-filter linear
+--group-filter role:q_proj,role:o_proj --limit 2` selects at most two matching
+Linear groups.
+
+The evaluator validates and releases each shard before loading the next one.
+It writes atomic per-case records, baseline caches, and run manifests under
+ignored `benchmarks/realdata/`. Resume keys include source-file hashes or
+resolved Git commits plus the evaluator semantics, so editing a path candidate
+cannot silently reuse stale results. `--force` recomputes all selected units.

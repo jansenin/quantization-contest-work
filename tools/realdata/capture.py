@@ -945,6 +945,13 @@ def run_capture(
                 f"manifest corpus SHA-256 changed for dataset {dataset_id}; "
                 "the corpus file must stay fixed"
             )
+        captured_torch = (existing.get("runtime") or {}).get("torch_version")
+        if captured_torch != torch.__version__:
+            raise shards.ResumeMismatchError(
+                f"dataset {dataset_id} was captured with torch {captured_torch!r}, "
+                f"but the current version is {torch.__version__!r}; use a separate "
+                "output root rather than mixing runtime versions"
+            )
         if existing.get("status") == "complete" and not force:
             _verify_manifest_groups(existing, output_dir)
             return _summary(dataset_id, output_dir, existing, reused=True)
