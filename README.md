@@ -62,9 +62,12 @@ The real-model data pipeline keeps model snapshots and partial downloads under
 ignored `data/`. Set up its isolated dependency once:
 
 ```bash
-python3 -m venv .venv-data
+python3 -m venv --system-site-packages .venv-data
 .venv-data/bin/pip install -r requirements-data.txt
 ```
+
+Using system site packages reuses an existing CPU PyTorch installation instead
+of downloading a second large PyTorch/CUDA stack into the data-tooling venv.
 
 Inspect the model profiles, then start the laptop-sized profile in the
 background:
@@ -97,3 +100,26 @@ profiles selects approximately 414.72 GB after deduplication:
 
 To put model data on a different disk, pass both `--cache-dir` and
 `--state-file`; reuse the same paths when resuming.
+
+## Real-model capture
+
+Capture a short integration dataset from the pinned Qwen3-0.6B snapshot:
+
+```bash
+.venv-data/bin/python tools/capture_real.py --smoke --threads 1
+```
+
+After the smoke run succeeds, capture the full five-calibration/five-test
+sequence-length pattern:
+
+```bash
+.venv-data/bin/python tools/capture_real.py --threads 1
+```
+
+By default the capture selects the first, middle, and last transformer layers
+and records `q_proj`, `o_proj`, `gate_proj`, `up_proj`, and `down_proj` Linear
+groups plus post-normalization, post-RoPE Q/K and attention-input V. Raw BF16
+groups are written atomically under ignored
+`data/real-captures/<dataset_id>/`. Rerunning an identical command verifies
+completed shard hashes and resumes missing groups; use `--force` only to
+discard and rebuild that dataset.

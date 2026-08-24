@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "calib": [
+    "今天下午出门时天空阴沉沉的，云层压得很低，风从河面上吹过来带着凉意。街角的梧桐树叶子被雨打得发亮，小贩把遮阳棚压低了半米，收音机里播着明天的天气预报。",
+    "Low-bit quantization compresses neural-network tensors into a handful of discrete carrier values plus per-block scale factors, trading precision for bandwidth. The crux is how much signal survives a second quantization pass through a foreign value set.",
+    "矩阵乘法是注意力计算的核心算子：查询向量与键向量做点积并缩放，随后经 softmax 得到权重，再与值向量加权求和。头维数、头数和并行分块共同决定内存访问的模式与吞吐瓶颈。",
+    "The old library closed at nine, and the streetlights flickered on one by one as the fog rolled in from the bay. A cyclist rang his bell twice, the sound swallowed almost instantly by the damp air of the docks. It felt like the city was holding its breath.",
+    "BF16 mantissa truncation and NVFP4's shared exponent are different animals: the former keeps the dynamic range of FP32 while the latter reuses an E2M1 grid inside each sixteen-value block. Converting between them therefore never reduces to a simple bit-slice operation."
+  ],
+  "test": [
+    "旋转位置编码把相对位置信息直接注入查询与键向量：先按频率拆分成旋转角，再与正弦余弦因子做二维旋转。窗口滑动注意力则把每层可观察的范围限制在固定跨度内，以换取更平缓的内存占用。",
+    "Wind chimes hung from the eave, and every few minutes the breeze rearranged their conversation. Nobody had lived in the cottage for two winters, yet the garden still knew its gardener, row after row of patient green waiting for spring.",
+    "GQA 通过让多个查询头共享同一组键值头来压缩缓存：键值张量的形状从查询头数降为键值头数，推理时再按分组重复展开。它是内存带宽与表达力之间的一个已被广泛接受的折中。",
+    "The competition harness feeds each group five calibration samples and five test samples, all in NVFP4. Whatever state you store during calibration is handed back verbatim during online quantization, so the shape of that state is a free design variable.",
+    "一个量化块内的最大值决定整个块的缩放因子，因此单个离群值会把其余数值的精度压平。分块分层补偿的思路是把残差按十六个子块再缩放一次，再按四元素子组修正符号与尾数。"
+  ]
+}
