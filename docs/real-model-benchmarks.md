@@ -116,3 +116,102 @@ v008 is entirely from layer-27 `up_proj`.
 These findings should be combined with additional architectures before changing
 the submission candidate. One small Qwen model is realistic evidence, but it is
 still one model family and only three sampled layers.
+
+## DeepSeek-R1-Distill-Qwen-1.5B
+
+Dataset `834a78afb85e5d5a` was captured from pinned revision
+`ad9f0ae0864d7fbcd1cd905e3c6c5b069cc8b562` with Transformers 4.57.6 and one
+CPU thread. It contains Qwen2 layers 0, 14, and 27 with 12 query heads, 2 KV
+heads, and head dimension 128. The same five Linear roles and full sample-length
+pattern as the Qwen capture were used.
+
+- Capture: 18 groups, 36m18s, 4.22 GiB peak RSS, no swap.
+- Evaluation: 2,160 valid candidate cases, 36m22s, 1.92 GiB peak RSS, no swap.
+- Failures or invalid outputs: none.
+
+| Variant | Ceil | Nearest | Stochastic | Pooled |
+|---|---:|---:|---:|---:|
+| v001 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| v002 | 9.7527 | 11.0750 | 10.5792 | 10.4690 |
+| v003 | 5.7999 | 7.5558 | 6.9990 | 6.7849 |
+| v004 | 7.9212 | 9.5718 | 9.0168 | 8.8366 |
+| v005 | 8.7742 | 10.0967 | 9.7117 | 9.5275 |
+| v006 | 9.7508 | 10.8573 | 10.2235 | 10.2772 |
+| v007 | **11.1093** | **12.0375** | **11.6586** | **11.6018** |
+| v008 | **11.1093** | **12.0375** | **11.6586** | **11.6018** |
+
+v007 wins all three source modes. v008 is bit-identical because its H64 gate
+never fires on this capture. The improvement is mostly Attention: pooled over
+the modes, v002 scores 10.48% on Linear and 10.41% on Attention, while v007
+scores 10.31% on Linear and 18.05% on Attention. Layer-0 Attention remains the
+main negative tail for every variant; v002 reaches -51.99% on one case, and
+v007 reduces but does not eliminate that regression.
+
+## SmolLM2-1.7B
+
+Dataset `097430592fe2f4d6` was captured from pinned revision
+`31b70e2e869a7173562077fd711b654946d38674` with Transformers 4.57.6 and one
+CPU thread. It contains Llama layers 0, 12, and 23 with 32 query heads, 32 KV
+heads, and head dimension 64, adding ordinary multi-head Attention coverage.
+
+- Capture: 18 groups, 1h06m35s, 4.49 GiB peak RSS, no swap.
+- Evaluation: 2,160 valid candidate cases, 19m02s, 2.14 GiB peak RSS, no swap.
+- Evaluation used six CPU threads; failures or invalid outputs: none.
+
+| Variant | Ceil | Nearest | Stochastic | Pooled |
+|---|---:|---:|---:|---:|
+| v001 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| v002 | **8.9888** | 10.0799 | 10.3240 | **9.7976** |
+| v003 | 5.4887 | 5.6978 | 6.3514 | 5.8460 |
+| v004 | 7.8373 | 7.9335 | 8.6729 | 8.1479 |
+| v005 | 8.2610 | 8.5177 | 9.1771 | 8.6519 |
+| v006 | 8.9287 | 9.4613 | 9.5628 | 9.3176 |
+| v007 | -1.9670 | **11.5605** | **11.8617** | 7.1517 |
+| v008 | -1.9670 | **11.5605** | **11.8617** | 7.1517 |
+
+The ceil result exposes a severe role-specific failure hidden by the other
+modes: layer-23 `o_proj` under v007/v008 is negative on all five cases and
+reaches -951.48% on the shortest sample. This single group-mode drives the
+overall ceil result below zero. v002 is less aggressive and wins pooled on this
+model, while v007/v008 win nearest and stochastic. As on DeepSeek, v008 is
+bit-identical to v007 because the H64 gate never fires.
+
+## Cross-model comparison
+
+All three datasets contain the same number of groups and cases, so the following
+means weight each captured model equally. Qwen and DeepSeek were evaluated with
+one thread; SmolLM2 used six. A fixed six-thread run is expected to be
+repeatable, but parallel reduction order can differ from one-thread arithmetic,
+so thread count remains part of each run's provenance.
+
+| Variant | Ceil | Nearest | Stochastic | Pooled |
+|---|---:|---:|---:|---:|
+| v001 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| v002 | **10.7982** | 11.3560 | 10.9669 | **11.0403** |
+| v003 | 6.3316 | 6.8054 | 6.7952 | 6.6441 |
+| v004 | 8.8579 | 9.1217 | 9.1933 | 9.0576 |
+| v005 | 9.4045 | 9.6239 | 9.7358 | 9.5881 |
+| v006 | 10.2898 | 10.5323 | 10.2862 | 10.3694 |
+| v007 | 7.4541 | 11.7362 | 11.5783 | 10.2562 |
+| v008 | 7.4310 | **11.8565** | **11.5882** | 10.2919 |
+
+The pooled order is v002, v006, v008, v007, v005, v004, v003, v001. That does
+not identify an official winner because the source-scale recipe and organizer
+baseline are unknown, but it changes the interpretation of the Qwen-only run:
+
+- v002 is the most robust Linear policy in this three-model sample and wins the
+  pooled mean despite losing to v007/v008 on DeepSeek.
+- v007/v008 are consistently strongest on Attention, with a cross-model pooled
+  Attention improvement of 16.27%, versus 14.62% for v006 and 9.93% for v002.
+- The wide activation search in v007 can produce catastrophic architecture- and
+  mode-specific Linear tails. SmolLM2 layer-23 `o_proj` is the current clearest
+  counterexample.
+- v008's H64 gate changes only 25 of 810 records across the three captures, all
+  on Qwen layer 27. It never fires on DeepSeek or SmolLM2, so its measured gain
+  over v007 is narrow and Qwen-specific.
+- v001 remains exactly v000 on every locally generated source mode and model.
+
+These captures contain only three layers and five test prompts per model.
+Individual tails are actionable counterexamples, while small differences in
+global means should not be treated as high-confidence estimates of hidden-test
+ranking.

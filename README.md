@@ -151,3 +151,5 @@ cannot silently reuse stale results. `--force` recomputes all selected units.
 
 Tracked, disaggregated results from completed captures are recorded in
 [`docs/real-model-benchmarks.md`](docs/real-model-benchmarks.md).
+User-reported contest-platform scores and runtimes are recorded separately in
+[`docs/official-submission-results.md`](docs/official-submission-results.md).
