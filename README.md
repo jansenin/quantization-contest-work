@@ -148,3 +148,6 @@ It writes atomic per-case records, baseline caches, and run manifests under
 ignored `benchmarks/realdata/`. Resume keys include source-file hashes or
 resolved Git commits plus the evaluator semantics, so editing a path candidate
 cannot silently reuse stale results. `--force` recomputes all selected units.
+
+Tracked, disaggregated results from completed captures are recorded in
+[`docs/real-model-benchmarks.md`](docs/real-model-benchmarks.md).
