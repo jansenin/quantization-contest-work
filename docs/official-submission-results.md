@@ -12,16 +12,15 @@ standard conversion and hidden cases are unavailable locally.
 | `solution/v001-bf16-target` | 1240 | 111 s |
 | `solution/v002-e6m2-neighbors` | 5025 | 113 s |
 | `solution/v003-role-gated` | 3600 | 111 s |
-| `solution/v004-calibration-weighted` | 4340 | 127 s |
+| `solution/v004-calibration-weighted` | 4340 | 117 s |
 | `solution/v005-activation-weighted` | 4600 | 111 s |
 | `solution/v006-qk-weighted` | 4750 | 123 s |
 | `solution/v007-akv-wide-search` | 5276 | 98 s |
 | `solution/v008-gated-hadamard` | **5326** | 120 s |
 
 The two baseline runs show at least 13 seconds of platform-level runtime
-variation. The reported rough range was 92-120 seconds, although the explicit
-v004 measurement is 127 seconds; the table preserves the individual values.
-All variants are comfortably below the stated five-minute limit.
+variation. Measurements range from 92 to 123 seconds and are comfortably below
+the stated five-minute limit.
 
 ## Interpretation
 

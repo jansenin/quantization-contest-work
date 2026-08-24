@@ -103,6 +103,15 @@ To put model data on a different disk, pass both `--cache-dir` and
 
 ## Real-model capture
 
+Qwen3, Qwen2, and Llama captures use `.venv-data`. Qwen3.5 requires a separate
+environment because its released implementation first appears in Transformers
+5.2.0:
+
+```bash
+python3 -m venv --system-site-packages .venv-data-qwen35
+.venv-data-qwen35/bin/pip install -r requirements-data-qwen35.txt
+```
+
 Capture a short integration dataset from the pinned Qwen3-0.6B snapshot:
 
 ```bash
@@ -123,6 +132,15 @@ groups are written atomically under ignored
 `data/real-captures/<dataset_id>/`. Rerunning an identical command verifies
 completed shard hashes and resumes missing groups; use `--force` only to
 discard and rebuild that dataset.
+
+For hybrid Qwen3.5 models, the default selects the first, middle, and last
+ordinary full-attention layers and excludes linear-attention layers from Q/K/V
+capture. Run it with the dedicated environment:
+
+```bash
+.venv-data-qwen35/bin/python tools/capture_real.py \
+  --model qwen3.5-2b --threads 6
+```
 
 ## Real-model evaluation
 

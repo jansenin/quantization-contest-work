@@ -15,11 +15,20 @@ This is the first real-model data milestone:
   interrupted runs resume by verifying hashes and skipping complete groups;
 - attention captured at the eager kernel boundary by monkeypatching the
   per-architecture ``eager_attention_forward`` with try/finally restoration
-  (Qwen3, Qwen2 and Llama registered; the three eager kernels share one
-  signature in transformers 4.57.6: ``(module, query, key, value,
-  attention_mask, scaling, dropout=0.0, **kwargs)``, so the wrapper captures
-  Q/K after the architecture-specific RoPE (plus q/k-norm for Qwen3) and the
-  actual V exactly at the kernel entry).
+  (Qwen3, Qwen2, Llama and Qwen3.5 registered; the eager kernels share one
+  signature -- ``(module, query, key, value, attention_mask, scaling,
+  dropout=0.0, **kwargs)`` in transformers 4.57.6 and 5.2.0 -- so the wrapper
+  captures Q/K after the architecture-specific RoPE (plus q/k-norm for
+  Qwen3/Qwen3.5) and the actual V exactly at the kernel entry);
+- Qwen3.5 hybrid text support: the snapshot's outer ``model_type`` is
+  ``qwen3_5`` with the text structure nested under ``text_config`` (which
+  carries ``num_hidden_layers``, ``layer_types``, heads and head_dim).  Only
+  ``layer_types == "full_attention"`` decoder layers expose ``self_attn``;
+  linear-attention layers expose ``linear_attn`` and are never attention
+  capture targets.  The default layer selection for a hybrid architecture is
+  [first full-attention layer, full-attention layer nearest the conventional
+  midpoint, last full-attention layer], and q/k/v/o projection roles are
+  filtered off non-full layers while the MLP roles stay available everywhere.
 
 ``transformers`` and model weights are loaded lazily (only inside
 ``RealLoader.load_model``) and never at module import time.
@@ -162,13 +171,35 @@ def _sample_manifest_entry(sample: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def select_layers(num_layers: int, layers: Sequence[int] | None = None) -> list[int]:
-    """Default to [0, midpoint, last]; otherwise validate a caller-supplied list."""
+def select_layers(
+    num_layers: int,
+    layers: Sequence[int] | None = None,
+    layer_types: Sequence[str] | None = None,
+) -> list[int]:
+    """Select the layers to capture.
+
+    Caller-supplied ``layers`` are validated as-is.  Without an explicit
+    selection the default is ``[0, midpoint, last]``; for a hybrid architecture
+    whose ``layer_types`` pattern contains ``"full_attention"`` entries the
+    default becomes ``[first full-attention, full-attention nearest the
+    conventional midpoint, last full-attention]`` (identical to the
+    conventional default when every layer is full-attention).
+    """
     num_layers = int(num_layers)
     if num_layers < 1:
         raise CaptureError(f"model has no layers (num_hidden_layers={num_layers})")
     if layers is None:
-        layers = [0, num_layers // 2, num_layers - 1]
+        full = [
+            index
+            for index, layer_type in enumerate(layer_types or [])
+            if layer_type == "full_attention"
+        ]
+        if full:
+            midpoint = num_layers // 2
+            nearest = min(full, key=lambda index: abs(index - midpoint))
+            layers = [full[0], nearest, full[-1]]
+        else:
+            layers = [0, num_layers // 2, num_layers - 1]
     selected: list[int] = []
     for raw in layers:
         index = int(raw)
@@ -242,7 +273,10 @@ class _BaseAdapter:
 
     The model surface is stable: ``model.model.layers[i]`` holds a decoder
     layer whose ``self_attn`` (with ``layer_idx``) and ``mlp`` (with the linear
-    roles) are the capture targets.
+    roles) are the capture targets.  Hybrid architectures (Qwen3.5) only
+    expose ``self_attn`` on their ``full_attention`` layers, so validation
+    probes for the first layer that actually carries the attention module
+    instead of assuming layer 0.
     """
 
     arch: str | None = None
@@ -265,17 +299,18 @@ class _BaseAdapter:
         return getattr(getattr(layer, self.linear_parent_attr), role)
 
     def attention_meta(self, attention_module: Any, config: Any) -> tuple[int, int, int]:
+        text_config = getattr(config, "text_config", None) or config
         q_heads = getattr(attention_module, "num_heads", None) or getattr(
-            config, "num_attention_heads", None
+            text_config, "num_attention_heads", None
         )
         kv_heads = getattr(attention_module, "num_key_value_heads", None) or getattr(
-            config, "num_key_value_heads", None
+            text_config, "num_key_value_heads", None
         )
         head_dim = getattr(attention_module, "head_dim", None) or getattr(
-            config, "head_dim", None
+            text_config, "head_dim", None
         )
         if head_dim is None and q_heads:
-            head_dim = getattr(config, "hidden_size", 0) // q_heads
+            head_dim = getattr(text_config, "hidden_size", 0) // q_heads
         if not (q_heads and kv_heads and head_dim):
             raise CaptureError(
                 f"cannot resolve attention heads/head_dim for architecture {self.arch!r}"
@@ -283,11 +318,39 @@ class _BaseAdapter:
         return int(q_heads), int(kv_heads), int(head_dim)
 
     def validate(self, model: Any) -> None:
-        """Cheap structural check that the loaded model matches the adapter."""
+        """Cheap structural check that the loaded model matches the adapter.
+
+        The MLP surface is probed on layer 0 (every decoder layer has an MLP);
+        the attention surface is probed on the first layer that exposes
+        ``self_attn`` so hybrid models whose layer 0 is a linear-attention
+        layer still validate.
+        """
         try:
+            num_layers = len(model.model.layers)
+            if num_layers < 1:
+                raise CaptureError(
+                    f"architecture {self.arch!r} adapter: model has no decoder layers"
+                )
             for role in self.linear_roles:
-                self.get_linear_module(model, 0, role)
-            attention = self.get_attention_module(model, 0)
+                if role not in _ATTENTION_ROLES:
+                    self.get_linear_module(model, 0, role)
+            probe: int | None = None
+            attention: Any = None
+            for layer_idx in range(num_layers):
+                try:
+                    attention = self.get_attention_module(model, layer_idx)
+                except AttributeError:
+                    continue
+                probe = layer_idx
+                break
+            if probe is None or attention is None:
+                raise CaptureError(
+                    f"architecture {self.arch!r} adapter: no decoder layer exposes "
+                    f"the {self.attention_attr!r} attention module"
+                )
+            for role in self.linear_roles:
+                if role in _ATTENTION_ROLES:
+                    self.get_linear_module(model, probe, role)
             self.attention_meta(attention, model.config)
         except CaptureError:
             raise
@@ -341,7 +404,8 @@ class Qwen3Adapter(_BaseAdapter):
             dropout: float = 0.0,
             **kwargs,
         ):
-            if int(attention_module.layer_idx) in pending:
+            layer_idx = getattr(attention_module, "layer_idx", None)
+            if layer_idx is not None and int(layer_idx) in pending:
                 callback(attention_module, query, key, value)
             return original(
                 attention_module,
@@ -388,6 +452,63 @@ class LlamaAdapter(Qwen3Adapter):
     modeling_module_name = "transformers.models.llama.modeling_llama"
 
 
+class Qwen3_5Adapter(Qwen3Adapter):
+    """Qwen3.5 hybrid text adapter.
+
+    The snapshot config's outer ``model_type`` is ``qwen3_5`` with the text
+    structure nested under ``text_config`` (``num_hidden_layers``,
+    ``layer_types``, attention heads).  Only ``full_attention`` decoder layers
+    carry ``self_attn``; ``linear_attention`` layers carry ``linear_attn``
+    instead.  ``AutoModelForCausalLM`` maps the snapshot to the text-only
+    ``Qwen3_5ForCausalLM`` (``model.model.layers``), whose eager kernel
+    ``transformers.models.qwen3_5.modeling_qwen3_5.eager_attention_forward``
+    shares the qwen3/qwen2/llama signature in transformers 5.2.0.
+    """
+
+    arch = "qwen3_5"
+    modeling_module_name = "transformers.models.qwen3_5.modeling_qwen3_5"
+
+    def validate(self, model: Any) -> None:
+        """Structural validation for the hybrid text model.
+
+        Does not assume layer 0 carries ``self_attn``: the token-mixer layout
+        comes from ``config.text_config.layer_types``, so the attention surface
+        is probed on the first ``full_attention`` layer and the MLP surface on
+        layer 0 (which every decoder layer has).
+        """
+        try:
+            config = getattr(model, "config", None)
+            text_config = getattr(config, "text_config", None) or config
+            layer_types = list(getattr(text_config, "layer_types", []) or [])
+            if len(layer_types) != len(model.model.layers):
+                raise CaptureError(
+                    f"architecture {self.arch!r}: layer_types length "
+                    f"{len(layer_types)} != decoder layers {len(model.model.layers)}"
+                )
+            full_indices = [
+                index
+                for index, layer_type in enumerate(layer_types)
+                if layer_type == "full_attention"
+            ]
+            if not full_indices:
+                raise CaptureError(
+                    f"architecture {self.arch!r}: text_config.layer_types contains "
+                    "no full_attention layers"
+                )
+            for role in ("gate_proj", "up_proj", "down_proj"):
+                self.get_linear_module(model, 0, role)
+            probe = full_indices[0]
+            for role in ("q_proj", "k_proj", "v_proj", "o_proj"):
+                self.get_linear_module(model, probe, role)
+            self.attention_meta(self.get_attention_module(model, probe), config)
+        except CaptureError:
+            raise
+        except Exception as error:
+            raise CaptureError(
+                f"loaded model does not match {self.arch!r} adapter layout: {error}"
+            ) from None
+
+
 class FakeAdapter(_BaseAdapter):
     """Structural adapter for unit-test fake modules.  Fake attention modules
     invoke their ``_rd_attn_cb`` attribute at the same boundary contract as the
@@ -405,6 +526,7 @@ _REAL_ADAPTERS: dict[str, type[_BaseAdapter]] = {
     "qwen3": Qwen3Adapter,
     "qwen2": Qwen2Adapter,
     "llama": LlamaAdapter,
+    "qwen3_5": Qwen3_5Adapter,
 }
 
 #: Projection roles hosted by the attention module (self_attn).
@@ -497,6 +619,21 @@ class RealLoader:
             raise CaptureError(f"snapshot for {alias} has no config.json: {snapshot}")
         with open(config_path, encoding="utf-8") as stream:
             model_config = json.load(stream)
+        # Qwen3.5 snapshots nest the text structure under ``text_config``; the
+        # outer config only carries ``model_type`` and the vision config.
+        text_config = model_config.get("text_config")
+        if isinstance(text_config, dict) and text_config.get("num_hidden_layers"):
+            layers_config = text_config
+            layer_types = list(text_config.get("layer_types") or [])
+            full_attention = [
+                index
+                for index, layer_type in enumerate(layer_types)
+                if layer_type == "full_attention"
+            ]
+        else:
+            layers_config = model_config
+            layer_types = []
+            full_attention = []
         return {
             "real": True,
             "alias": alias,
@@ -504,7 +641,9 @@ class RealLoader:
             "resolved_revision": record.get("resolved_revision") or snapshot.name,
             "snapshot_path": str(snapshot),
             "arch": model_config.get("model_type"),
-            "num_layers": int(model_config.get("num_hidden_layers", 0)),
+            "num_layers": int(layers_config.get("num_hidden_layers", 0)),
+            "layer_types": layer_types,
+            "full_attention": full_attention,
             "config": model_config,
             "transformers_version": _transformers_version(),
         }
@@ -712,8 +851,18 @@ def _remove_capture(session: _CaptureSession, handles: Sequence[Any], restore: C
 # ---------------------------------------------------------------------------
 
 
+def _text_config_dict(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The effective text config: the nested ``text_config`` when the outer
+    model config is a wrapper (e.g. Qwen3.5 hybrid), else the config itself."""
+    nested = config.get("text_config")
+    if isinstance(nested, dict) and nested.get("num_hidden_layers"):
+        return nested
+    return config
+
+
 def _model_meta_dict(meta: Mapping[str, Any]) -> dict[str, Any]:
     config = meta.get("config") or {}
+    text_config = _text_config_dict(config)
     return {
         "alias": meta.get("alias"),
         "repo_id": meta.get("repo_id"),
@@ -721,13 +870,13 @@ def _model_meta_dict(meta: Mapping[str, Any]) -> dict[str, Any]:
         "snapshot_path": meta.get("snapshot_path"),
         "arch": meta.get("arch"),
         "transformers_version": meta.get("transformers_version"),
-        "num_layers": config.get("num_hidden_layers"),
-        "hidden_size": config.get("hidden_size"),
-        "intermediate_size": config.get("intermediate_size"),
-        "num_attention_heads": config.get("num_attention_heads"),
-        "num_key_value_heads": config.get("num_key_value_heads"),
-        "head_dim": config.get("head_dim"),
-        "vocab_size": config.get("vocab_size"),
+        "num_layers": text_config.get("num_hidden_layers"),
+        "hidden_size": text_config.get("hidden_size"),
+        "intermediate_size": text_config.get("intermediate_size"),
+        "num_attention_heads": text_config.get("num_attention_heads"),
+        "num_key_value_heads": text_config.get("num_key_value_heads"),
+        "head_dim": text_config.get("head_dim"),
+        "vocab_size": text_config.get("vocab_size"),
         "attn_implementation": "eager",
     }
 
@@ -742,6 +891,7 @@ def _new_manifest(
     roles: Sequence[str],
     seed: int,
     threads: int,
+    full_attention: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -761,6 +911,7 @@ def _new_manifest(
         "layers": {
             "selected": [int(layer) for layer in layers],
             "linear_roles": list(roles),
+            "full_attention": [int(layer) for layer in (full_attention or [])],
         },
         "groups": [],
         "seed": int(seed),
@@ -958,8 +1109,34 @@ def run_capture(
         raise CaptureError(
             f"metadata for {meta.get('alias')!r} lacks a positive num_hidden_layers"
         )
-    layers = select_layers(num_layers, config.get("layers"))
+    layers = select_layers(
+        num_layers,
+        config.get("layers"),
+        layer_types=meta.get("layer_types"),
+    )
     roles = normalize_linear_roles(config.get("linear_roles"))
+
+    # Hybrid architectures only carry attention (q/k/v/o) on their
+    # full-attention layers; without a ``layer_types`` pattern every layer is
+    # treated as full-attention (qwen3/qwen2/llama).
+    layer_types = meta.get("layer_types") or []
+    if layer_types:
+        full_set = {int(index) for index in (meta.get("full_attention") or [])}
+    else:
+        full_set = set(range(num_layers))
+    planned_linear = [
+        (layer, role)
+        for layer in layers
+        for role in roles
+        if role not in _ATTENTION_ROLES or layer in full_set
+    ]
+    planned_attn = [layer for layer in layers if layer in full_set]
+    if not planned_linear and not planned_attn:
+        raise CaptureError(
+            f"layer/role selection for {meta.get('alias')!r} captures nothing: "
+            f"layers={layers}, linear_roles={list(roles)}, "
+            f"full-attention layers={sorted(full_set)}"
+        )
 
     canonical = canonical_capture_config(
         meta, corpus_sha, lengths, layers, roles, seed, threads
@@ -1006,16 +1183,23 @@ def run_capture(
         _wipe_output(output_dir)
 
     pending_linear = [
-        site
-        for site in ((layer, role) for layer in layers for role in roles)
-        if f"{site[0]}.{site[1]}" not in completed
+        site for site in planned_linear if f"{site[0]}.{site[1]}" not in completed
     ]
     pending_attn = [
-        layer for layer in layers if f"{layer}.self_attn" not in completed
+        layer for layer in planned_attn if f"{layer}.self_attn" not in completed
     ]
     if not pending_linear and not pending_attn:
         manifest = existing or _new_manifest(
-            meta, dataset_id, corpus, corpus_sha, [], layers, roles, seed, threads
+            meta,
+            dataset_id,
+            corpus,
+            corpus_sha,
+            [],
+            layers,
+            roles,
+            seed,
+            threads,
+            full_attention=sorted(full_set),
         )
         _write_manifest_with_groups(manifest, manifest_path, completed, "complete")
         return _summary(dataset_id, output_dir, manifest, reused=False)
@@ -1034,7 +1218,16 @@ def run_capture(
         pending_attn=pending_attn,
     )
     manifest = _new_manifest(
-        meta, dataset_id, corpus, corpus_sha, samples, layers, roles, seed, threads
+        meta,
+        dataset_id,
+        corpus,
+        corpus_sha,
+        samples,
+        layers,
+        roles,
+        seed,
+        threads,
+        full_attention=sorted(full_set),
     )
     if existing is not None and existing.get("created_at"):
         manifest["created_at"] = existing["created_at"]

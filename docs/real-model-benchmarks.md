@@ -215,3 +215,64 @@ These captures contain only three layers and five test prompts per model.
 Individual tails are actionable counterexamples, while small differences in
 global means should not be treated as high-confidence estimates of hidden-test
 ranking.
+
+## Qwen3.5-2B
+
+Dataset `4405c7fadc8bef16` was captured from pinned revision
+`15852e8c16360a2fea060d615a32b45270f8a8fc` with Transformers 5.2.0 and six
+CPU threads. Qwen3.5 is a hybrid architecture: only layers 3, 7, 11, 15, 19,
+and 23 use ordinary softmax Attention. The capture samples full-attention layers
+3, 11, and 23, with 8 query heads, 2 KV heads, and head dimension 256. Its 15
+Linear and 3 post-RoPE Attention groups use the same full sample-length pattern
+as the earlier captures.
+
+- Capture: 18 groups, 10m38s, 5.19 GiB peak RSS, no swap.
+- Evaluation: 2,160 valid candidate cases, 14m45s, 1.83 GiB peak RSS, no swap.
+- Evaluation used six CPU threads; failures or invalid outputs: none.
+
+| Variant | Ceil | Nearest | Stochastic | Pooled |
+|---|---:|---:|---:|---:|
+| v001 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| v002 | **14.3068** | **15.1556** | **15.2742** | **14.9122** |
+| v003 | 8.4980 | 7.7710 | 7.8144 | 8.0278 |
+| v004 | 11.3696 | 10.5763 | 10.4725 | 10.8061 |
+| v005 | 12.1138 | 11.2166 | 11.1679 | 11.4994 |
+| v006 | 12.5854 | 11.6798 | 11.6296 | 11.9649 |
+| v007 | 13.9685 | 13.7080 | 13.0060 | 13.5609 |
+| v008 | 13.9685 | 13.7080 | 13.0060 | 13.5609 |
+
+v002 wins all three source modes. Pooled over modes, it scores 14.21% on
+Linear and 18.44% on Attention. v007/v008 are weaker on Linear at 10.67% but
+substantially stronger on Attention at 28.01%. Their Attention improvement
+increases with depth: 23.29% at layer 3, 26.10% at layer 11, and 34.65% at
+layer 23.
+
+v008 is bit-identical to v007 on all 270 Qwen3.5 records because its H64 gate
+never fires. The largest negative tail is Attention under stochastic source
+generation: v002-v005 reach -41.72% on one layer-11 case; v007/v008 have only
+two negative cases, -18.51% at layer 3 and -14.58% at layer 11. All values are
+finite and legal.
+
+## Four-model comparison
+
+The following table adds Qwen3.5 to the equal-case macro average. Qwen3 and
+DeepSeek used one evaluation thread; SmolLM2 and Qwen3.5 used six. The latter
+also uses Transformers 5.2.0 rather than 4.57.6, so these settings remain part
+of each run's provenance.
+
+| Variant | Ceil | Nearest | Stochastic | Pooled |
+|---|---:|---:|---:|---:|
+| v001 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| v002 | **11.6753** | 12.3059 | 12.0437 | **12.0083** |
+| v003 | 6.8732 | 7.0468 | 7.0500 | 6.9900 |
+| v004 | 9.4858 | 9.4853 | 9.5131 | 9.4947 |
+| v005 | 10.0818 | 10.0221 | 10.0939 | 10.0659 |
+| v006 | 10.8637 | 10.8192 | 10.6221 | 10.7683 |
+| v007 | 9.0827 | 12.2292 | 11.9352 | 11.0824 |
+| v008 | 9.0654 | **12.3194** | **11.9427** | 11.1092 |
+
+The pooled order is now v002, v008, v007, v006, v005, v004, v003, v001.
+Across four models, v002 remains the strongest Linear policy at 12.00% pooled,
+while v007/v008 remain the strongest Attention policy at 19.20%. v008 differs
+from v007 in only 25 of 1,080 records, all from Qwen3-0.6B layer 27; its gate
+never fires on DeepSeek, SmolLM2, or Qwen3.5.

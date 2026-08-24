@@ -3,6 +3,7 @@ __pycache__/
 *.swp
 *.swo
 /.venv-data/
+/.venv-data-qwen35/
 
 # Generated submission artifact; the separate submission repo tracks it.
 /solution.zip

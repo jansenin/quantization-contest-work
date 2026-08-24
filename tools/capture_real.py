@@ -74,7 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_int_list,
         default=None,
         metavar="L0,L1,...",
-        help="comma list of layer indices (default: 0, midpoint, last)",
+        help=(
+            "comma list of layer indices (default: 0, midpoint, last; hybrid "
+            "models such as Qwen3.5 default to the first full-attention layer, "
+            "the full-attention layer nearest the conventional midpoint, and "
+            "the last full-attention layer, e.g. [3, 11, 23] for a 24-layer "
+            "Qwen3.5)"
+        ),
     )
     parser.add_argument(
         "--linear-roles",

@@ -44,6 +44,20 @@ from tools.realdata.shards import ResumeMismatchError
 FAKE_REVISION = "a" * 40
 FAKE_TRANSFORMERS = "4.57.6-test"
 
+#: The Qwen3.5-2B snapshot's hybrid layer pattern: 24 layers, full attention
+#: on [3, 7, 11, 15, 19, 23], heads 8:2 with head_dim 256.
+QWEN35_LAYER_TYPES = [
+    layer_type
+    for index in range(24)
+    for layer_type in (
+        ("full_attention",) if index % 4 == 3 else ("linear_attention",)
+    )
+]
+QWEN35_FULL_ATTENTION = [
+    index for index, layer_type in enumerate(QWEN35_LAYER_TYPES)
+    if layer_type == "full_attention"
+]
+
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -132,6 +146,20 @@ class DoubleFireMLP(FakeMLP):
         return self.down_proj(self.gate_proj(x) * self.up_proj(x))
 
 
+class FakeLinearAttention(torch.nn.Module):
+    """Stand-in for Qwen3_5GatedDeltaNet: a linear-attention token mixer with
+    no eager-kernel attention and no q/k/v/o projections."""
+
+    def __init__(self, layer_idx: int, hidden: int) -> None:
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.in_proj = FakeLinear(hidden, hidden)
+        self.out_proj = FakeLinear(hidden, hidden)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.out_proj(self.in_proj(x))
+
+
 class FakeDecoderLayer(torch.nn.Module):
     def __init__(
         self,
@@ -141,13 +169,22 @@ class FakeDecoderLayer(torch.nn.Module):
         q_heads: int,
         kv_heads: int,
         head_dim: int,
+        layer_type: str = "full_attention",
     ) -> None:
         super().__init__()
-        self.self_attn = FakeAttention(layer_idx, hidden, q_heads, kv_heads, head_dim)
+        self.layer_type = layer_type
+        if layer_type == "full_attention":
+            self.self_attn = FakeAttention(layer_idx, hidden, q_heads, kv_heads, head_dim)
+        else:
+            self.linear_attn = FakeLinearAttention(layer_idx, hidden)
         self.mlp = FakeMLP(hidden, intermediate)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.mlp(self.self_attn(x))
+        if self.layer_type == "full_attention":
+            x = self.self_attn(x)
+        else:
+            x = self.linear_attn(x)
+        return self.mlp(x)
 
 
 class _Layers:
@@ -164,10 +201,15 @@ class FakeModel(torch.nn.Module):
         q_heads: int = 4,
         kv_heads: int = 2,
         head_dim: int = 32,
+        layer_types: list[str] | None = None,
     ) -> None:
         super().__init__()
+        if layer_types is not None:
+            layer_types = list(layer_types)
+            if len(layer_types) != num_layers:
+                raise ValueError("fake layer_types length must equal num_layers")
         self.config = types.SimpleNamespace(
-            model_type="qwen3",
+            model_type="qwen3_5" if layer_types is not None else "qwen3",
             num_hidden_layers=num_layers,
             hidden_size=hidden,
             intermediate_size=intermediate,
@@ -178,9 +220,31 @@ class FakeModel(torch.nn.Module):
             attention_bias=False,
             rms_norm_eps=1e-6,
         )
+        if layer_types is not None:
+            self.config.layer_types = layer_types
+            self.config.text_config = types.SimpleNamespace(
+                model_type="qwen3_5_text",
+                num_hidden_layers=num_layers,
+                hidden_size=hidden,
+                intermediate_size=intermediate,
+                num_attention_heads=q_heads,
+                num_key_value_heads=kv_heads,
+                head_dim=head_dim,
+                layer_types=layer_types,
+            )
         self.model = _Layers(
             [
-                FakeDecoderLayer(i, hidden, intermediate, q_heads, kv_heads, head_dim)
+                FakeDecoderLayer(
+                    i,
+                    hidden,
+                    intermediate,
+                    q_heads,
+                    kv_heads,
+                    head_dim,
+                    layer_type=(
+                        layer_types[i] if layer_types is not None else "full_attention"
+                    ),
+                )
                 for i in range(num_layers)
             ]
         )
@@ -233,11 +297,19 @@ class FakeLoader:
             "repo_id": "tests/fake-model",
             "resolved_revision": FAKE_REVISION,
             "snapshot_path": "(fake)",
-            "arch": "qwen3",
+            "arch": model_config.model_type,
             "num_layers": cfg["num_hidden_layers"],
             "config": cfg,
             "transformers_version": FAKE_TRANSFORMERS,
         }
+        layer_types = getattr(model_config, "layer_types", None)
+        if layer_types is not None:
+            meta["layer_types"] = list(layer_types)
+            meta["full_attention"] = [
+                index
+                for index, layer_type in enumerate(layer_types)
+                if layer_type == "full_attention"
+            ]
         meta.update(self.meta_overrides)
         return meta
 
@@ -346,6 +418,50 @@ class DatasetIdTest(unittest.TestCase):
             select_layers(3, [0, 3])
         with self.assertRaises(CaptureError):
             select_layers(3, [-1])
+
+    def test_select_layers_hybrid_default_is_full_attention_anchored(self) -> None:
+        # The Qwen3.5-2B snapshot: 24 layers with full attention on
+        # [3, 7, 11, 15, 19, 23]; conventional midpoint is 12, whose nearest
+        # full-attention layer is 11 -> default [first, nearest, last] = [3, 11, 23].
+        self.assertEqual(
+            select_layers(24, layer_types=QWEN35_LAYER_TYPES),
+            [3, 11, 23],
+        )
+        # A 12-layer hybrid with full attention on [0, 5, 11]: midpoint 6,
+        # nearest full layer 5.
+        self.assertEqual(
+            select_layers(
+                12,
+                layer_types=["full_attention", "linear_attention", "linear_attention",
+                             "linear_attention", "linear_attention", "full_attention",
+                             "linear_attention", "linear_attention", "linear_attention",
+                             "linear_attention", "linear_attention", "full_attention"],
+            ),
+            [0, 5, 11],
+        )
+
+    def test_select_layers_hybrid_default_all_full_or_all_linear(self) -> None:
+        # Every layer full-attention: identical to the conventional default.
+        self.assertEqual(
+            select_layers(28, layer_types=["full_attention"] * 28),
+            [0, 14, 27],
+        )
+        # No full-attention layer: fall back to the conventional default (MLP
+        # roles are still capturable everywhere).
+        self.assertEqual(
+            select_layers(24, layer_types=["linear_attention"] * 24),
+            [0, 12, 23],
+        )
+
+    def test_select_layers_explicit_list_ignores_layer_types(self) -> None:
+        # Explicit layers may include linear-attention layers and are validated
+        # against the layer count only.
+        self.assertEqual(
+            select_layers(24, layers=[1, 3, 5], layer_types=QWEN35_LAYER_TYPES),
+            [1, 3, 5],
+        )
+        with self.assertRaises(CaptureError):
+            select_layers(24, layers=[24], layer_types=QWEN35_LAYER_TYPES)
 
 
 class AtomicStorageTest(unittest.TestCase):
@@ -466,6 +582,32 @@ class RealAdapterAndLoaderTest(unittest.TestCase):
         restore()
         self.assertIs(modeling.eager_attention_forward, original)
 
+    def test_eager_wrapper_ignores_modules_without_layer_idx(self) -> None:
+        # transformers 5.x modules (e.g. Qwen3_5VisionAttention) share the
+        # module-level eager_attention_forward but carry no layer_idx; the
+        # wrapper must pass them through untouched instead of crashing.
+        calls = []
+
+        def original(module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs):
+            calls.append(module)
+            return "attention-output"
+
+        modeling = types.SimpleNamespace(eager_attention_forward=original)
+        callback_calls = []
+        adapter = capture.Qwen3Adapter()
+        with mock.patch.object(capture.importlib, "import_module", return_value=modeling):
+            restore = adapter.install_eager_monkeypatch(
+                lambda *args: callback_calls.append(args), [3]
+            )
+        q, k, v = object(), object(), object()
+        vision = types.SimpleNamespace()  # no layer_idx attribute
+        result = modeling.eager_attention_forward(vision, q, k, v, None, 0.125)
+        self.assertEqual(result, "attention-output")
+        self.assertEqual(calls, [vision])
+        self.assertEqual(callback_calls, [])
+        restore()
+        self.assertIs(modeling.eager_attention_forward, original)
+
     def test_attention_meta_falls_back_to_config_for_qwen2_llama_modules(self) -> None:
         # Real Qwen2Attention/LlamaAttention do not store num_heads; the base
         # adapter must resolve heads from the config and head_dim from the module.
@@ -566,6 +708,93 @@ class RealAdapterAndLoaderTest(unittest.TestCase):
             self.assertEqual(meta["resolved_revision"], FAKE_REVISION)
             self.assertEqual(meta["transformers_version"], "4.57.6")
 
+    def test_real_loader_metadata_reads_nested_text_config_for_qwen35(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "config.json").write_text(
+                json.dumps(
+                    {
+                        "model_type": "qwen3_5",
+                        "text_config": {
+                            "model_type": "qwen3_5_text",
+                            "num_hidden_layers": 24,
+                            "layer_types": QWEN35_LAYER_TYPES,
+                            "num_attention_heads": 8,
+                            "num_key_value_heads": 2,
+                            "head_dim": 256,
+                            "hidden_size": 2048,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = root / "state.json"
+            state.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "qwen3.5-2b": {
+                                "status": "complete",
+                                "repo_id": "Qwen/Qwen3.5-2B",
+                                "resolved_revision": FAKE_REVISION,
+                                "snapshot_path": str(snapshot),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loader = capture.RealLoader(state)
+            with mock.patch.object(
+                capture.importlib_metadata, "version", return_value="5.2.0"
+            ):
+                meta = loader.metadata({"alias": "qwen3.5-2b"})
+            self.assertEqual(meta["arch"], "qwen3_5")
+            self.assertEqual(meta["num_layers"], 24)
+            self.assertEqual(meta["layer_types"], QWEN35_LAYER_TYPES)
+            self.assertEqual(meta["full_attention"], QWEN35_FULL_ATTENTION)
+            self.assertEqual(
+                meta["config"]["text_config"]["num_attention_heads"], 8
+            )
+
+    def test_real_loader_metadata_flat_config_is_unchanged(self) -> None:
+        # A flat qwen3 snapshot (no text_config) must keep the legacy metadata.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "config.json").write_text(
+                json.dumps({"model_type": "qwen3", "num_hidden_layers": 28}),
+                encoding="utf-8",
+            )
+            state = root / "state.json"
+            state.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "qwen3-0.6b": {
+                                "status": "complete",
+                                "repo_id": "Qwen/Qwen3-0.6B",
+                                "resolved_revision": FAKE_REVISION,
+                                "snapshot_path": str(snapshot),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loader = capture.RealLoader(state)
+            with mock.patch.object(
+                capture.importlib_metadata, "version", return_value="4.57.6"
+            ):
+                meta = loader.metadata({"alias": "qwen3-0.6b"})
+            self.assertEqual(meta["arch"], "qwen3")
+            self.assertEqual(meta["num_layers"], 28)
+            self.assertEqual(meta["layer_types"], [])
+            self.assertEqual(meta["full_attention"], [])
+
     def test_real_loader_uses_supported_model_kwargs_and_disables_cache(self) -> None:
         recorded = {}
         model = mock.Mock()
@@ -600,6 +829,94 @@ class RealAdapterAndLoaderTest(unittest.TestCase):
         self.assertEqual(kwargs["dtype"], torch.bfloat16)
         self.assertEqual(kwargs["attn_implementation"], "eager")
         self.assertFalse(model.config.use_cache)
+
+
+class Qwen3_5AdapterTest(unittest.TestCase):
+    """Weight-free unit tests for the Qwen3.5 hybrid text adapter."""
+
+    def _hybrid_model(self, num_layers: int = 8, layer_types: list[str] | None = None) -> FakeModel:
+        pattern = layer_types or [
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention",
+        ][:num_layers]
+        return FakeModel(num_layers=num_layers, layer_types=pattern)
+
+    def test_adapter_registration_and_module_name(self) -> None:
+        self.assertIn("qwen3_5", capture._REAL_ADAPTERS)
+        adapter = capture.get_adapter("qwen3_5")
+        self.assertIsInstance(adapter, capture.Qwen3_5Adapter)
+        self.assertEqual(
+            adapter.modeling_module_name,
+            "transformers.models.qwen3_5.modeling_qwen3_5",
+        )
+        self.assertEqual(adapter.arch, "qwen3_5")
+
+    def test_attention_meta_reads_nested_text_config(self) -> None:
+        # The real Qwen3_5Attention stores head_dim but not num_heads; the
+        # adapter must resolve 8:2 hd256 from the nested text_config.
+        module = types.SimpleNamespace(head_dim=256, num_key_value_groups=4)
+        config = types.SimpleNamespace(
+            text_config=types.SimpleNamespace(
+                num_attention_heads=8,
+                num_key_value_heads=2,
+                head_dim=256,
+                hidden_size=2048,
+            )
+        )
+        self.assertEqual(
+            capture.Qwen3_5Adapter().attention_meta(module, config), (8, 2, 256)
+        )
+        # head_dim may come from the module even when the config lacks it.
+        module_only = types.SimpleNamespace(head_dim=128)
+        config_no_head_dim = types.SimpleNamespace(
+            text_config=types.SimpleNamespace(
+                num_attention_heads=8,
+                num_key_value_heads=2,
+                hidden_size=2048,
+            )
+        )
+        self.assertEqual(
+            capture.Qwen3_5Adapter().attention_meta(module_only, config_no_head_dim),
+            (8, 2, 128),
+        )
+
+    def test_validate_does_not_assume_layer0_self_attn(self) -> None:
+        model = self._hybrid_model()
+        # layer 0 is linear-attention: no self_attn attribute at all.
+        self.assertFalse(hasattr(model.model.layers[0], "self_attn"))
+        capture.Qwen3_5Adapter().validate(model)  # must not raise
+
+    def test_validate_rejects_missing_full_attention_layers(self) -> None:
+        model = FakeModel(
+            num_layers=4, layer_types=["linear_attention"] * 4
+        )
+        with self.assertRaisesRegex(CaptureError, "no full_attention layers"):
+            capture.Qwen3_5Adapter().validate(model)
+
+    def test_validate_rejects_layer_types_length_mismatch(self) -> None:
+        model = FakeModel(num_layers=4, layer_types=["full_attention"] * 4)
+        model.config.text_config.layer_types = ["full_attention"] * 3
+        with self.assertRaisesRegex(CaptureError, "layer_types length"):
+            capture.Qwen3_5Adapter().validate(model)
+
+    def test_fake_adapter_validate_probes_first_full_layer(self) -> None:
+        # The fake adapter used by weight-free capture runs must also validate
+        # hybrid models whose layer 0 is a linear-attention layer.
+        model = self._hybrid_model()
+        capture.FakeAdapter().validate(model)
+
+    def test_validate_fails_cleanly_on_wrong_layout(self) -> None:
+        model = FakeModel(num_layers=2, layer_types=["full_attention"] * 2)
+        # Sabotage the MLP surface on layer 0.
+        del model.model.layers[0].mlp
+        with self.assertRaisesRegex(CaptureError, "adapter layout"):
+            capture.Qwen3_5Adapter().validate(model)
 
 
 class ShardSchemaTest(unittest.TestCase):
@@ -824,6 +1141,79 @@ class CaptureRunTest(unittest.TestCase):
                 )
                 self.assertEqual(tuple(attention["calib"][0]["q"].shape), (8, 128))
 
+    def test_run_capture_hybrid_qwen35_default_selection(self) -> None:
+        model = FakeModel(num_layers=24, layer_types=QWEN35_LAYER_TYPES)
+        loader = FakeLoader(model=model)
+        summary = run_capture(self._config(), loader=loader)
+        self.assertEqual(summary["status"], "complete")
+        # Hybrid default selection: [3, 11, 23]; MLP roles on those layers plus
+        # attention groups on the full-attention ones.
+        self.assertEqual(summary["groups"], {"linear": 15, "attention": 3})
+        output = Path(summary["output_dir"])
+        manifest = self._load_manifest(summary["dataset_id"])
+        self.assertEqual(manifest["model"]["arch"], "qwen3_5")
+        self.assertEqual(manifest["layers"]["selected"], [3, 11, 23])
+        self.assertEqual(manifest["layers"]["full_attention"], QWEN35_FULL_ATTENTION)
+        # Only full-attention layers produce attention shards.
+        self.assertEqual(len(list((output / "attention").glob("*.pt"))), 3)
+        self.assertTrue((output / "attention" / "3.self_attn.pt").is_file())
+        self.assertFalse((output / "attention" / "0.self_attn.pt").exists())
+        # Linear sites exist on the selected layers (attention + MLP roles).
+        self.assertTrue((output / "linear" / "3.q_proj.pt").is_file())
+        self.assertTrue((output / "linear" / "11.gate_proj.pt").is_file())
+        self.assertTrue((output / "linear" / "23.down_proj.pt").is_file())
+        # Attention heads resolved through the nested text_config.
+        attention = shards.load_tensor(output / "attention" / "11.self_attn.pt")
+        self.assertEqual(attention["q_num_heads"], 4)
+        self.assertEqual(attention["kv_num_heads"], 2)
+        self.assertEqual(attention["head_dim"], 32)
+
+    def test_run_capture_hybrid_explicit_linear_layers_keep_mlp_roles(self) -> None:
+        model = FakeModel(num_layers=24, layer_types=QWEN35_LAYER_TYPES)
+        config = self._config(
+            layers=[0, 3],
+            linear_roles=["gate_proj", "up_proj", "down_proj"],
+        )
+        summary = run_capture(config, loader=FakeLoader(model=model))
+        self.assertEqual(summary["groups"], {"linear": 6, "attention": 1})
+        output = Path(summary["output_dir"])
+        # MLP roles on a linear-attention layer are captured.
+        self.assertTrue((output / "linear" / "0.gate_proj.pt").is_file())
+        # Attention on the full-attention layer only.
+        self.assertTrue((output / "attention" / "3.self_attn.pt").is_file())
+        self.assertFalse((output / "attention" / "0.self_attn.pt").exists())
+
+    def test_run_capture_hybrid_filters_attention_roles_off_linear_layers(self) -> None:
+        model = FakeModel(num_layers=24, layer_types=QWEN35_LAYER_TYPES)
+        summary = run_capture(
+            self._config(layers=[0, 3]),
+            loader=FakeLoader(model=model),
+        )
+        # Layer 0 keeps only its MLP roles; layer 3 keeps all five roles.
+        self.assertEqual(summary["groups"], {"linear": 8, "attention": 1})
+        output = Path(summary["output_dir"])
+        self.assertTrue((output / "linear" / "0.gate_proj.pt").is_file())
+        self.assertFalse((output / "linear" / "0.q_proj.pt").exists())
+        self.assertTrue((output / "linear" / "3.q_proj.pt").is_file())
+        manifest = self._load_manifest(summary["dataset_id"])
+        self.assertEqual(manifest["layers"]["selected"], [0, 3])
+
+    def test_run_capture_hybrid_fails_clearly_when_selection_captures_nothing(self) -> None:
+        model = FakeModel(num_layers=24, layer_types=QWEN35_LAYER_TYPES)
+        config = self._config(
+            layers=[0, 1],
+            linear_roles=["q_proj", "o_proj"],
+        )
+        with self.assertRaisesRegex(CaptureError, "captures nothing"):
+            run_capture(config, loader=FakeLoader(model=model))
+
+    def test_manifest_full_attention_for_uniform_models(self) -> None:
+        # Uniform architectures record every layer as full-attention.
+        summary = run_capture(self._config(), loader=FakeLoader())
+        manifest = self._load_manifest(summary["dataset_id"])
+        self.assertEqual(manifest["layers"]["full_attention"], [0, 1, 2])
+        self.assertEqual(manifest["layers"]["selected"], [0, 1, 2])
+
     def test_reuse_skips_model_load_when_complete(self) -> None:
         run_capture(self._config(), loader=FakeLoader())
         loader2 = FakeLoader()
@@ -926,12 +1316,20 @@ class CaptureRunTest(unittest.TestCase):
         )
         with self.assertRaises(argparse.ArgumentTypeError):
             capture_real._parse_int_list("0,x")
+        # the --layers help must document the hybrid default
+        layers_help = next(
+            action.help
+            for action in capture_real.build_parser()._actions
+            if action.dest == "layers"
+        )
+        self.assertIn("hybrid", layers_help)
+        self.assertIn("full-attention", layers_help)
 
 
 class RealEagerKernelContractTest(unittest.TestCase):
     """Weight-free check of the adapter's core assumption: the eager attention
-    kernels of qwen3/qwen2/llama in the installed transformers share one
-    signature, so the shared wrapper applies to all three architectures."""
+    kernels of qwen3/qwen2/llama and, when installed, qwen3_5 share one
+    signature, so the shared wrapper applies to every registered architecture."""
 
     _HAVE_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
 
@@ -946,6 +1344,13 @@ class RealEagerKernelContractTest(unittest.TestCase):
             "sig = lambda fn: [(p.name, str(p.kind)) for p in inspect.signature(fn).parameters.values()];\n"
             "s3, s2, sl = sig(q3), sig(q2), sig(ll);\n"
             "assert s3 == s2 == sl, (s3, s2, sl);\n"
+            "try:\n"
+            " from transformers.models.qwen3_5.modeling_qwen3_5 import eager_attention_forward as q35\n"
+            "except ModuleNotFoundError:\n"
+            " q35 = None\n"
+            "if q35 is not None:\n"
+            " assert s3 == sig(q35), (s3, sig(q35))\n"
+            " print('QWEN35_EAGER_SIG_MATCH')\n"
             "print('EAGER_SIGS_MATCH')\n"
         )
         result = subprocess.run(
