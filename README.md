@@ -17,6 +17,13 @@ Add `--mini-sample example/mini_sample` for the slower public-data quality run.
 The evaluator writes detailed records under `benchmarks/records/`. Successful
 runs append to `progress/results.jsonl` unless `--no-append` is supplied.
 
+Reproduce the public NVFP4 source-scale fingerprint report:
+
+```bash
+python3 tools/fingerprint_nvfp4.py \
+  --markdown-output docs/public-nvfp4-fingerprint.md
+```
+
 ## Dashboard
 
 ```bash

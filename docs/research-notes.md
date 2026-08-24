@@ -4,6 +4,32 @@ This file separates proved structure from empirical guidance. Detailed experimen
 results belong in `benchmarks/records/`; this file records conclusions that should
 survive individual variants.
 
+## Public NVFP4 source fingerprint
+
+Observed: all 3,465,984 source scales in the public mini-sample are exact
+positive finite E4M3FN values, all 55,455,744 carriers are legal E2M1 values,
+and carrier-scale products are exactly representable in BF16 throughout this
+sample, so its reference dequantization multiplication adds no rounding error.
+Every stored block satisfies `scale == ceil_E4M3(max_stored_abs / 6)`, and the
+identity also holds on all unsaturated blocks, which are concentrated in the
+Linear weight at E4M3 subnormal scales.
+
+Design rationale: an E4M3-grid per-16 scale followed by E2M1 carrier rounding is
+the most direct compatible recipe, while the current synthetic generator's
+general `BF16(max_abs / 6)` recipe is not: arbitrary BF16 scales are not
+restricted to the E4M3 grid.
+
+Non-identifiability: the fixed-point identity does not identify historical
+ceiling rounding. It is tautological when carrier 6 occurs, and unsaturated
+subnormal blocks with maximum carrier 3 or 4 can also arise under nearest scale
+rounding, because the E4M3FN subnormal grid is coarse relative to the scale
+(`delta = 2^-9`; original maximum `9.5 * delta` with nearest scale `2 * delta`
+stores carrier 4 and still satisfies the identity). The original unquantized
+tensors are unavailable, so carrier tie-breaking, prior clipping, the source
+scale rounding mode, and a unique generating algorithm remain unidentifiable.
+See `docs/public-nvfp4-fingerprint.md` for the reproducible role-separated
+report and the full counterexample.
+
 ## Exact HiF4 block facts
 
 - A 64-value block has shape `(8, 2, 4)`. For a fixed legal E6M2 scale factor
