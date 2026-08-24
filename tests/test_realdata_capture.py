@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -403,6 +404,133 @@ class RealAdapterAndLoaderTest(unittest.TestCase):
         restore()
         self.assertIs(modeling.eager_attention_forward, original)
 
+    def test_qwen2_eager_wrapper_captures_and_restores(self) -> None:
+        calls = []
+
+        def original(module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs):
+            calls.append((module, query, key, value, attention_mask, scaling, dropout, kwargs))
+            return "qwen2-attention-output"
+
+        modeling = types.SimpleNamespace(eager_attention_forward=original)
+        callback_calls = []
+        adapter = capture.Qwen2Adapter()
+        self.assertEqual(adapter.arch, "qwen2")
+        self.assertEqual(
+            adapter.modeling_module_name, "transformers.models.qwen2.modeling_qwen2"
+        )
+        with mock.patch.object(capture.importlib, "import_module", return_value=modeling):
+            restore = adapter.install_eager_monkeypatch(
+                lambda *args: callback_calls.append(args), [7]
+            )
+        attention = types.SimpleNamespace(layer_idx=7)
+        q, k, v = object(), object(), object()
+        result = modeling.eager_attention_forward(
+            attention, q, k, v, "mask", 0.125, dropout=0.0, sliding_window=None
+        )
+        self.assertEqual(result, "qwen2-attention-output")
+        self.assertEqual(callback_calls, [(attention, q, k, v)])
+        # qwen2 passes sliding_window through **kwargs; the wrapper must preserve it
+        self.assertEqual(calls[0][4:], ("mask", 0.125, 0.0, {"sliding_window": None}))
+        # layers outside the pending set are not captured
+        skipped = types.SimpleNamespace(layer_idx=99)
+        modeling.eager_attention_forward(skipped, q, k, v, None, 0.125)
+        self.assertEqual(callback_calls, [(attention, q, k, v)])
+        restore()
+        self.assertIs(modeling.eager_attention_forward, original)
+
+    def test_llama_eager_wrapper_captures_and_restores(self) -> None:
+        calls = []
+
+        def original(module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs):
+            calls.append((module, query, key, value, attention_mask, scaling, dropout, kwargs))
+            return "llama-attention-output"
+
+        modeling = types.SimpleNamespace(eager_attention_forward=original)
+        callback_calls = []
+        adapter = capture.LlamaAdapter()
+        self.assertEqual(adapter.arch, "llama")
+        self.assertEqual(
+            adapter.modeling_module_name, "transformers.models.llama.modeling_llama"
+        )
+        with mock.patch.object(capture.importlib, "import_module", return_value=modeling):
+            restore = adapter.install_eager_monkeypatch(
+                lambda *args: callback_calls.append(args), [14]
+            )
+        attention = types.SimpleNamespace(layer_idx=14)
+        q, k, v = object(), object(), object()
+        # llama does not pass sliding_window
+        result = modeling.eager_attention_forward(attention, q, k, v, None, 0.0625)
+        self.assertEqual(result, "llama-attention-output")
+        self.assertEqual(callback_calls, [(attention, q, k, v)])
+        self.assertEqual(calls[0][4:], (None, 0.0625, 0.0, {}))
+        restore()
+        self.assertIs(modeling.eager_attention_forward, original)
+
+    def test_attention_meta_falls_back_to_config_for_qwen2_llama_modules(self) -> None:
+        # Real Qwen2Attention/LlamaAttention do not store num_heads; the base
+        # adapter must resolve heads from the config and head_dim from the module.
+        qwen2_module = types.SimpleNamespace(head_dim=128, num_key_value_groups=6)
+        qwen2_config = types.SimpleNamespace(
+            num_attention_heads=12, num_key_value_heads=2, hidden_size=1536
+        )
+        self.assertEqual(
+            capture.Qwen2Adapter().attention_meta(qwen2_module, qwen2_config),
+            (12, 2, 128),
+        )
+        llama_module = types.SimpleNamespace(head_dim=64)
+        llama_config = types.SimpleNamespace(
+            num_attention_heads=32, num_key_value_heads=32, hidden_size=2048
+        )
+        self.assertEqual(
+            capture.LlamaAdapter().attention_meta(llama_module, llama_config),
+            (32, 32, 64),
+        )
+
+    def test_qwen2_and_llama_metadata_and_adapter_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entries = {}
+            for alias, model_type, num_layers in (
+                ("deepseek-r1-qwen-1.5b", "qwen2", 28),
+                ("smollm2-1.7b", "llama", 24),
+            ):
+                snapshot = root / f"snapshot-{alias}"
+                snapshot.mkdir()
+                (snapshot / "config.json").write_text(
+                    json.dumps(
+                        {"model_type": model_type, "num_hidden_layers": num_layers}
+                    ),
+                    encoding="utf-8",
+                )
+                entries[alias] = {
+                    "status": "complete",
+                    "repo_id": f"tests/{alias}",
+                    "resolved_revision": FAKE_REVISION,
+                    "snapshot_path": str(snapshot),
+                }
+            state = root / "state.json"
+            state.write_text(json.dumps({"models": entries}), encoding="utf-8")
+            loader = capture.RealLoader(state)
+            with mock.patch.object(
+                capture.importlib_metadata, "version", return_value="4.57.6"
+            ):
+                qwen2_meta = loader.metadata({"alias": "deepseek-r1-qwen-1.5b"})
+                llama_meta = loader.metadata({"alias": "smollm2-1.7b"})
+            self.assertEqual(qwen2_meta["arch"], "qwen2")
+            self.assertEqual(qwen2_meta["num_layers"], 28)
+            self.assertEqual(llama_meta["arch"], "llama")
+            self.assertEqual(llama_meta["num_layers"], 24)
+            self.assertIsInstance(
+                capture.get_adapter(qwen2_meta["arch"]), capture.Qwen2Adapter
+            )
+            self.assertIsInstance(
+                capture.get_adapter(llama_meta["arch"]), capture.LlamaAdapter
+            )
+            self.assertIn("qwen2", capture._REAL_ADAPTERS)
+            self.assertIn("llama", capture._REAL_ADAPTERS)
+            with self.assertRaisesRegex(NotImplementedError, "supported: llama, qwen2, qwen3"):
+                capture.get_adapter("unknown-arch")
+
     def test_real_loader_metadata_reads_pinned_snapshot_without_transformers_import(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -681,6 +809,21 @@ class CaptureRunTest(unittest.TestCase):
             self.assertIn("token_hash", sample)
             self.assertNotIn("token_ids", sample, "manifest must not store raw token ids")
 
+    def test_run_capture_with_qwen2_and_llama_archs(self) -> None:
+        for arch in ("qwen2", "llama"):
+            with self.subTest(arch=arch):
+                loader = FakeLoader(meta_overrides={"arch": arch})
+                summary = run_capture(self._config(), loader=loader)
+                self.assertEqual(summary["status"], "complete")
+                self.assertEqual(summary["groups"], {"linear": 15, "attention": 3})
+                manifest = self._load_manifest(summary["dataset_id"])
+                self.assertEqual(manifest["model"]["arch"], arch)
+                self.assertEqual(manifest["layers"]["selected"], [0, 1, 2])
+                attention = shards.load_tensor(
+                    Path(summary["output_dir"]) / "attention" / "1.self_attn.pt"
+                )
+                self.assertEqual(tuple(attention["calib"][0]["q"].shape), (8, 128))
+
     def test_reuse_skips_model_load_when_complete(self) -> None:
         run_capture(self._config(), loader=FakeLoader())
         loader2 = FakeLoader()
@@ -783,6 +926,36 @@ class CaptureRunTest(unittest.TestCase):
         )
         with self.assertRaises(argparse.ArgumentTypeError):
             capture_real._parse_int_list("0,x")
+
+
+class RealEagerKernelContractTest(unittest.TestCase):
+    """Weight-free check of the adapter's core assumption: the eager attention
+    kernels of qwen3/qwen2/llama in the installed transformers share one
+    signature, so the shared wrapper applies to all three architectures."""
+
+    _HAVE_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
+
+    @unittest.skipUnless(_HAVE_TRANSFORMERS, "transformers not installed")
+    def test_real_eager_kernel_signatures_match_across_architectures(self) -> None:
+        script = (
+            "import sys; sys.modules['torchvision']=None;\n"
+            "import inspect;\n"
+            "from transformers.models.qwen3.modeling_qwen3 import eager_attention_forward as q3;\n"
+            "from transformers.models.qwen2.modeling_qwen2 import eager_attention_forward as q2;\n"
+            "from transformers.models.llama.modeling_llama import eager_attention_forward as ll;\n"
+            "sig = lambda fn: [(p.name, str(p.kind)) for p in inspect.signature(fn).parameters.values()];\n"
+            "s3, s2, sl = sig(q3), sig(q2), sig(ll);\n"
+            "assert s3 == s2 == sl, (s3, s2, sl);\n"
+            "print('EAGER_SIGS_MATCH')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("EAGER_SIGS_MATCH", result.stdout)
 
 
 class SubprocessSmokeTest(unittest.TestCase):

@@ -13,10 +13,13 @@ This is the first real-model data milestone:
   BF16 activations) and one per selected Attention layer (flattened q/k/v),
   each finalized independently with the manifest updated after every shard so
   interrupted runs resume by verifying hashes and skipping complete groups;
-- attention captured at the eager kernel boundary by monkeypatching
-  ``transformers.models.qwen3.modeling_qwen3.eager_attention_forward`` with
-  try/finally restoration (Qwen3 first; qwen2/llama plug in via the adapter
-  registry).
+- attention captured at the eager kernel boundary by monkeypatching the
+  per-architecture ``eager_attention_forward`` with try/finally restoration
+  (Qwen3, Qwen2 and Llama registered; the three eager kernels share one
+  signature in transformers 4.57.6: ``(module, query, key, value,
+  attention_mask, scaling, dropout=0.0, **kwargs)``, so the wrapper captures
+  Q/K after the architecture-specific RoPE (plus q/k-norm for Qwen3) and the
+  actual V exactly at the kernel entry).
 
 ``transformers`` and model weights are loaded lazily (only inside
 ``RealLoader.load_model``) and never at module import time.
@@ -303,7 +306,14 @@ class _BaseAdapter:
 class Qwen3Adapter(_BaseAdapter):
     """Real Qwen3 adapter: wraps ``eager_attention_forward`` in the modeling
     module so the wrapper observes query/key/value exactly at the eager kernel
-    boundary (post q/k-norm, post RoPE, actual value)."""
+    boundary (post q/k-norm, post RoPE, actual value).
+
+    Also the shared implementation for Qwen2/Llama: their
+    ``eager_attention_forward`` in transformers 4.57.6 has the identical
+    signature ``(module, query, key, value, attention_mask, scaling,
+    dropout=0.0, **kwargs)``, so the same wrapper applies with only the
+    modeling module name differing.
+    """
 
     arch = "qwen3"
     modeling_module_name = "transformers.models.qwen3.modeling_qwen3"
@@ -352,6 +362,32 @@ class Qwen3Adapter(_BaseAdapter):
         return restore
 
 
+class Qwen2Adapter(Qwen3Adapter):
+    """Qwen2 adapter (DeepSeek-R1-Distill-Qwen-1.5B etc.).
+
+    Captures query/key after Qwen2's ``apply_rotary_pos_emb`` and the actual
+    value at the ``transformers.models.qwen2.modeling_qwen2`` eager kernel
+    boundary.  The Qwen2 forward additionally forwards
+    ``sliding_window=...`` through ``**kwargs`` (None for the full-attention
+    layers of the downloaded model), which the shared wrapper preserves.
+    """
+
+    arch = "qwen2"
+    modeling_module_name = "transformers.models.qwen2.modeling_qwen2"
+
+
+class LlamaAdapter(Qwen3Adapter):
+    """Llama adapter (SmolLM2-1.7B-Instruct etc.).
+
+    Captures query/key after Llama's ``apply_rotary_pos_emb`` and the actual
+    value at the ``transformers.models.llama.modeling_llama`` eager kernel
+    boundary.  Unlike Qwen2/Qwen3, Llama does not pass ``sliding_window``.
+    """
+
+    arch = "llama"
+    modeling_module_name = "transformers.models.llama.modeling_llama"
+
+
 class FakeAdapter(_BaseAdapter):
     """Structural adapter for unit-test fake modules.  Fake attention modules
     invoke their ``_rd_attn_cb`` attribute at the same boundary contract as the
@@ -367,9 +403,8 @@ class FakeAdapter(_BaseAdapter):
 
 _REAL_ADAPTERS: dict[str, type[_BaseAdapter]] = {
     "qwen3": Qwen3Adapter,
-    # qwen2 / llama plug in here: class Qwen2Adapter(_BaseAdapter) with
-    # modeling_module_name = "transformers.models.qwen2.modeling_qwen2",
-    # monkeypatch_attr = "eager_attention_forward" (same boundary contract).
+    "qwen2": Qwen2Adapter,
+    "llama": LlamaAdapter,
 }
 
 #: Projection roles hosted by the attention module (self_attn).
