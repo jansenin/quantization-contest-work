@@ -30,6 +30,25 @@ scale rounding mode, and a unique generating algorithm remain unidentifiable.
 See `docs/public-nvfp4-fingerprint.md` for the reproducible role-separated
 report and the full counterexample.
 
+## Genuine ModelOpt checkpoint format
+
+ModelOpt NVFP4 checkpoint storage was validated against all 196 packed Linear
+weights in `NVFP4/Qwen3-0.6B-FP4` and their matching BF16 parent tensors. Each
+U8 byte packs consecutive K values with the even index in the low nibble and
+the odd index in the high nibble. `weight_scale` is one E4M3FN scale per 16 K
+values, and scalar F32 `weight_scale_2` is an essential tensor-global factor.
+Canonical decoding has mean normalized weight MSE 0.00900 and correlation
+0.99550; swapped nibbles are uncorrelated, while omitting the global factor
+produces a scale error of several orders of magnitude.
+
+Folding `weight_scale * weight_scale_2` to one BF16 contest scale is legal but
+not bit-exact to ModelOpt's separate-factor arithmetic: 87.68% of 440.4 million
+Qwen weight values agree exactly, mean absolute difference is `2.07e-5`, and
+maximum difference is `0.0078125`. Genuine checkpoints contain no prompt-
+dependent activation or Q/K/V captures, so they validate weight provenance and
+source-format realism but do not replace the local real-model capture pipeline.
+See `docs/genuine-nvfp4-validation.md` for hashes and reproduction commands.
+
 ## Exact HiF4 block facts
 
 - A 64-value block has shape `(8, 2, 4)`. For a fixed legal E6M2 scale factor

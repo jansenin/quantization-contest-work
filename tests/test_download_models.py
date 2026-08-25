@@ -33,6 +33,13 @@ class DownloadModelsTest(unittest.TestCase):
         self.assertEqual(selected.count("qwen3-0.6b"), 1)
         self.assertIn("qwen3-0.6b-nvfp4", selected)
 
+    def test_genuine_profile_includes_qwen_parent(self) -> None:
+        selected = download_models.select_models(self.catalog, ["genuine"], [])
+        self.assertEqual(
+            selected,
+            ["qwen3-0.6b", "qwen3-0.6b-nvfp4", "nemotron-embed-1b-nvfp4"],
+        )
+
     def test_unknown_selection_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown model aliases"):
             download_models.select_models(self.catalog, [], ["not-a-model"])

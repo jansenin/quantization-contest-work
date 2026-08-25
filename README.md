@@ -24,6 +24,25 @@ python3 tools/fingerprint_nvfp4.py \
   --markdown-output docs/public-nvfp4-fingerprint.md
 ```
 
+Validate ModelOpt-packed genuine NVFP4 weights against a matching BF16 parent:
+
+```bash
+.venv-data/bin/python tools/download_models.py --profile genuine
+.venv-data/bin/python tools/validate_genuine_nvfp4.py \
+  --nvfp4-snapshot data/huggingface-cache/models--NVFP4--Qwen3-0.6B-FP4/snapshots/<revision> \
+  --bf16-snapshot data/huggingface-cache/models--Qwen--Qwen3-0.6B/snapshots/<revision> \
+  --tensor "*.weight" --markdown-output /tmp/genuine-nvfp4.md
+```
+
+The `genuine` profile includes the Qwen BF16 parent required for numerical
+layout discrimination. A structural-only checkpoint without a matching parent
+can validate shapes and scale folding, but cannot establish a canonical fit.
+The validator exits nonzero when parent comparisons fail its absolute fit gate.
+
+The packed layout, parent comparison, contest-scale folding error, and exact
+checkpoint hashes are recorded in
+[`docs/genuine-nvfp4-validation.md`](docs/genuine-nvfp4-validation.md).
+
 ## Dashboard
 
 ```bash

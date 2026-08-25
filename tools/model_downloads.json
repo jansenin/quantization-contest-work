@@ -112,6 +112,7 @@
       "olmo2-32b-instruct"
     ],
     "genuine": [
+      "qwen3-0.6b",
       "qwen3-0.6b-nvfp4",
       "nemotron-embed-1b-nvfp4"
     ]
